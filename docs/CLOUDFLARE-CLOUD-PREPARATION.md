@@ -2,6 +2,10 @@
 
 核对日期：2026-09-30。目标：单人使用的 Agent Hub；用户目前没有自有域名，采用 Workers + SQLite Durable Objects + Cloudflare Access，使用账户的 `workers.dev` 地址。
 
+首次创建已于 **2026-09-30 14:29（Asia/Shanghai）** 完成，入口保持关闭。Worker `geoverse-agent-hub` 当前版本为 `1cbb2778-9d81-43b3-8903-989497a956b5`，部署 ID 为 `a282f474-8951-4aef-80b0-a879b3ea0393`。Cloudflare API 已核对：`enabled=false`、`previews_enabled=false`、自定义域名列表为空，HUB_TOKEN 为 `secret_text`，AgentHub 命名空间 `d5fe8ce040764582972ad1604ba8a69a` 的 `use_sqlite=true`。预定公网地址返回 HTTP 404 / error code 1042。
+
+**第 6 节已执行完成，无需再次首次创建。下一步从第 7 节配置 OTP 和 Access 开始。** PUBLIC_URL / ACCESS_AUD 仍为空，未迁移私人数据；本机密钥文件仍保留，尚未确认已存入密码管理器，因此没有删除。
+
 ## 1. 当前已经确认的内容
 
 | 项目 | 当前值 / 状态 | 依据 |
@@ -20,7 +24,7 @@
 | 当日 Workers 请求 | `0 / 100,000` | 实时 Usage，数值只代表核对时刻 |
 | Access 应用/AUD | 应用列表为空，暂无本项目 AUD | 已通过登录态只读查询 Access apps |
 | 身份提供商 | 只有一个 type=`cloudflare`，未发现 `onetimepin` | 只读查询身份提供商列表；163 邮箱登录还需设置 |
-| Durable Objects | 命名空间列表为空 | 已通过登录态只读查询 namespaces |
+| Durable Objects | 已创建 `geoverse-agent-hub_AgentHub`，SQLite 存储 | 首次创建后通过 Cloudflare API 核对 |
 
 截图中的管理员邮箱被截断，现已通过 Wrangler 核对完整管理员身份，本文不重复发布该管理邮箱。截图里“已连接身份提供商”的勾选不能证明能用 `hio250@163.com` 登录；实时查询也确认目前尚无 Access 应用，不能认为私人保护已经生效。
 
@@ -89,7 +93,7 @@ npx wrangler whoami
 
 1. 核对 Workers 套餐与当前使用量，确认允许 SQLite Durable Objects。
 2. 已有账户子域 `libra-liuyb.workers.dev`，无需重新注册或改名。
-3. 本项目 Worker 尚未创建，暂不开放其 `workers.dev`。
+3. 本项目 Worker 已完成首次创建，`workers.dev` 仍关闭。
 4. 团队域名已确认，后续如果修改团队名，再同步 `ACCESS_TEAM_DOMAIN`。
 
 账户子域决定所有 Worker 的地址，选择后避免频繁改名。[官方 workers.dev 配置](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/)
@@ -203,12 +207,12 @@ node kit/connect.mjs --url https://geoverse-agent-hub.libra-liuyb.workers.dev --
 
 ## 11. 本次准备完成范围
 
-- 已通过实时控制台和 Wrangler 锁定正确 account_id，确认 Workers Free、真实账户子域、团队域名、空 Access 应用列表和空 DO 命名空间。
+- 已通过实时控制台和 Wrangler 锁定正确 account_id，确认 Workers Free、真实账户子域、团队域名；准备时 Access 应用和 DO 命名空间为空，首次创建后已有 SQLite DO 命名空间。
 - 已提供无自有域名的 Workers + Access 发布顺序及密钥处理步骤。
 - 已增加 bootstrap/生产部署前配置检查，并接入 npm 发布命令和 CI。
 - 本机 Wrangler 已完成 OAuth 授权；配置仍保留关闭入口的状态，尚不存在的 AUD 保持空。
-- 已在不提交的 `.cloudflare/bootstrap-secrets.json` 生成独立云端 Secret 文件，验证不会覆盖已有密钥；还未上传云端。请在本机保存到密码管理器后再发布。
-- 本次未实际创建 Worker、Access 策略或付费资源，未迁移私人数据。仍需创建关闭入口的 Worker、配置 OTP/Access、取得 AUD、设置独立云端 Secret，才能完成真实发布和访问验收。
+- 已在不提交的 `.cloudflare/bootstrap-secrets.json` 生成独立云端 Secret 文件，验证不会覆盖已有密钥；首次创建已将 HUB_TOKEN 上传为云端 Secret。本机副本仍需本人存入密码管理器。
+- 已按用户要求创建关闭入口的 Worker 及 SQLite DO 命名空间，未创建 Access 策略或开通付费订阅，未迁移私人数据。仍需配置 OTP/Access、取得 AUD、填写 PUBLIC_URL，才能开放入口并完成访问验收。
 
 ## 12. 借鉴官方 Agent Setup 提示
 
