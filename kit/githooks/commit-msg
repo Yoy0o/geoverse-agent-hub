@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# agent/<任务编号>-… 分支上的提交，自动补上 “Task: <任务编号>” 尾注，方便追溯到工作台任务。
+b=$(git symbolic-ref --short HEAD 2>/dev/null) || exit 0
+case "$b" in agent/*) ;; *) exit 0 ;; esac
+id=$(printf '%s' "${b#agent/}" | sed -E 's/^(T[0-9]{6}-[A-Za-z0-9]+).*/\1/')
+grep -q '^Task: ' "$1" || git interpret-trailers --in-place --trailer "Task: $id" "$1"

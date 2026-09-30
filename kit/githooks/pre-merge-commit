@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# 合并 agent/* 分支前，在合并结果上再跑一次统一验证；不通过就中止合并。
+m="${GIT_REFLOG_ACTION:-} $(git name-rev --name-only MERGE_HEAD 2>/dev/null || true)"
+case "$m" in *agent/*) ;; *) exit 0 ;; esac
+echo "合并 Agent 分支前运行统一验证…"
+bash scripts/agent/verify.sh || { echo "验证未通过，合并已中止（运行 git merge --abort 恢复）" >&2; exit 1; }

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# 所有提交：禁止提交密钥类文件。agent/* 分支：还禁止提交受保护路径。对任何 Agent 和人都生效。
+SECRETS=('.env' '*/.env' '.env.*' '*/.env.*' '*.pem' '*.key' '*.p12' '*id_rsa*' 'secrets/*' '*.tfstate')
+PROTECT=(
+__PROTECT__
+)
+b=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+bad=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in .env.example|*/.env.example) continue ;; esac
+  for g in "${SECRETS[@]}"; do case "$f" in $g) echo "禁止提交密钥类文件：$f" >&2; bad=1 ;; esac; done
+  case "$b" in agent/*) for g in "${PROTECT[@]}"; do case "$f" in $g) echo "Agent 分支禁止提交受保护路径：$f（规则 $g）" >&2; bad=1 ;; esac; done ;; esac
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+if [ "$bad" -ne 0 ]; then echo "确认需要提交时，请人工检查后使用 git commit --no-verify" >&2; exit 1; fi
+exit 0

@@ -1,0 +1,16 @@
+node_modules/
+data/
+.env
+.env.*
+!.env.example
+output/
+.playwright-cli/
+*.log
+# Private exports and deployment/runtime state
+migrate/
+.wrangler/
+.cloudflare/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+dist/

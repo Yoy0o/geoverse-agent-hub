@@ -1,0 +1,28 @@
+{
+  "name": "agent-hub",
+  "version": "0.1.0",
+  "description": "自托管 Agent 工作台：任务、评审、规则 + 多 coding agent 接入（MCP / 钩子 / OTel）",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "cli": "node --disable-warning=ExperimentalWarning src/cli.js",
+    "test": "bash test/e2e.sh"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "express": "^5.2.1",
+    "jose": "^6.2.12",
+    "jszip": "^3.10.2",
+    "zod": "^4.6.5"
+  },
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260930.1",
+    "esbuild": "^0.28.2",
+    "wrangler": "^4.144.0"
+  }
+}

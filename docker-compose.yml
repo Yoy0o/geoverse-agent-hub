@@ -1,0 +1,32 @@
+# agent-hub：docker compose up -d
+# 首次启动后查看访问令牌：docker compose exec agent-hub node src/cli.js token
+services:
+  agent-hub:
+    build: .
+    image: agent-hub:0.1.0
+    container_name: agent-hub
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      # 默认只监听本机；放到服务器 / 局域网 / Tailscale 上用时，把 .env 的 HUB_BIND 改成 0.0.0.0 或 Tailscale IP
+      - "${HUB_BIND:-127.0.0.1}:${HUB_PORT:-8787}:8787"
+    volumes:
+      - hub-data:/data
+
+  # 可选：Cloudflare Tunnel，给 hub 一个公网 HTTPS 域名（claude.ai 连接器、手机访问需要）
+  # 在 Cloudflare Zero Trust 建隧道，公共主机名指向 http://agent-hub:8787，把隧道令牌填进 .env 的 CLOUDFLARE_TUNNEL_TOKEN
+  # 启动：docker compose --profile tunnel up -d
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - agent-hub
+
+volumes:
+  hub-data:

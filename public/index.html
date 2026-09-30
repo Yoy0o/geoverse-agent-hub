@@ -1,0 +1,1283 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Agent 工作台 · agent-hub</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%230B6E66%22/%3E%3Cpath d=%22M9 11h14M9 16h14M9 21h9%22 stroke=%22white%22 stroke-width=%222.6%22 stroke-linecap=%22round%22/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+:root{
+  --bg:#F2F5F4; --surface:#FFFFFF; --surface-2:#E8EEEC; --line:#D3DDDA; --line-2:#BFCCC8;
+  --ink:#12201C; --ink-2:#34443F; --muted:#5E706B;
+  --accent:#0B6E66; --accent-ink:#FFFFFF; --accent-soft:#DCEFEB;
+  --warn:#A86400; --warn-soft:#FAEBD2;
+  --ok:#2C7A39; --ok-soft:#DFF1E2; --bad:#B42318; --bad-soft:#FBE3E0;
+  --shadow:0 12px 40px rgba(18,32,28,.18);
+  --sans:"Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0D1412; --surface:#141D1B; --surface-2:#1B2624; --line:#2A3834; --line-2:#3A4B46;
+    --ink:#E3ECE9; --ink-2:#C0CDC9; --muted:#8C9E99;
+    --accent:#4DC1B4; --accent-ink:#06201D; --accent-soft:#15322E;
+    --warn:#E6A548; --warn-soft:#392A12;
+    --ok:#62BD70; --ok-soft:#16301B; --bad:#F07A6F; --bad-soft:#3A1A17;
+    --shadow:0 12px 40px rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0D1412; --surface:#141D1B; --surface-2:#1B2624; --line:#2A3834; --line-2:#3A4B46;
+  --ink:#E3ECE9; --ink-2:#C0CDC9; --muted:#8C9E99;
+  --accent:#4DC1B4; --accent-ink:#06201D; --accent-soft:#15322E;
+  --warn:#E6A548; --warn-soft:#392A12;
+  --ok:#62BD70; --ok-soft:#16301B; --bad:#F07A6F; --bad-soft:#3A1A17;
+  --shadow:0 12px 40px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+.feed{list-style:none;margin:0;padding:0;display:grid;gap:2px;font-size:13px}
+.feed li{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:8px;align-items:baseline;padding:4px 0;border-bottom:1px dashed var(--line)}
+.feed li:last-child{border-bottom:0}
+.feed .tm{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
+.feed .sm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--line-2);margin-right:4px}
+.dot.on{background:var(--ok)} .dot.warm{background:var(--warn)}
+code.cmd{display:block;white-space:pre-wrap;word-break:break-all;font-family:var(--mono);font-size:12.5px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.6;padding-inline:0;padding-block:0 48px;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--accent);text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1240px;margin:0 auto;padding-inline:16px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+
+/* top bar */
+.bar{padding-block:18px 10px}
+.bar .wrap{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px}
+.brand{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.brand h1{margin:0;font-size:20px;font-weight:700;letter-spacing:.01em}
+.brand span{font-size:13px;color:var(--muted)}
+.sync{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);font-family:var(--mono)}
+.sync i{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.sync.on i{background:var(--ok)} .sync.off i{background:var(--warn)}
+.tabs{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
+.tabs .wrap{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
+.tabs .wrap::-webkit-scrollbar{display:none}
+.tab{appearance:none;border:0;background:none;padding:10px 12px;font-size:14px;color:var(--muted);cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;align-items:center;gap:6px}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink);font-weight:700;border-bottom-color:var(--accent)}
+.tab .cnt{font-family:var(--mono);font-size:11px;padding:0 6px;border-radius:999px;background:var(--bad-soft);color:var(--bad);line-height:1.6}
+.banner{margin:12px 0 0;padding:10px 14px;border-radius:10px;background:var(--warn-soft);color:var(--ink);font-size:13px}
+main{padding-top:16px}
+
+/* layout */
+.grid2{display:grid;grid-template-columns:minmax(0,1fr);gap:14px}
+@media (min-width:900px){.grid2{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}}
+.stack{display:grid;gap:14px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:0}
+.panel h2{margin:0 0 10px;font-size:15px;font-weight:700;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.panel h2 small{font-weight:400;font-size:12px;color:var(--muted)}
+.hint{font-size:13px;color:var(--muted);margin:0 0 10px}
+.empty{padding:18px 8px;text-align:center;color:var(--muted);font-size:13px}
+
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.kpi{background:var(--surface);padding:12px 14px}
+.kpi .l{font-size:12px;color:var(--muted)}
+.kpi .v{font-family:var(--mono);font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.3}
+.kpi .s{font-size:11px;color:var(--muted);font-family:var(--mono)}
+
+/* attention list */
+.alist{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.aitem{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;border:1px solid var(--line);background:var(--bg);cursor:pointer;text-align:left;width:100%}
+.aitem:hover{border-color:var(--line-2)}
+.aitem .t{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.aitem .m{font-size:12px;color:var(--muted)}
+.stripe{width:4px;align-self:stretch;border-radius:2px;background:var(--muted)}
+.stripe.bad{background:var(--bad)} .stripe.warn{background:var(--warn)} .stripe.acc{background:var(--accent)}
+
+/* pills */
+.pill{display:inline-block;font-size:12px;font-weight:500;padding:0 8px;border-radius:999px;line-height:1.75;white-space:nowrap;background:var(--surface-2);color:var(--ink-2)}
+.pill.mono{font-size:11px;font-weight:600}
+.st-待规格,.st-待执行{background:var(--surface-2);color:var(--ink-2)}
+.st-执行中{background:var(--accent-soft);color:var(--accent)}
+.st-需介入{background:var(--bad-soft);color:var(--bad)}
+.st-待评审{background:var(--warn-soft);color:var(--warn)}
+.st-已合并{background:var(--ok-soft);color:var(--ok)}
+.st-已放弃{background:var(--surface-2);color:var(--muted);text-decoration:line-through}
+.rk-L1{background:var(--ok-soft);color:var(--ok)} .rk-L2{background:var(--accent-soft);color:var(--accent)}
+.rk-L3{background:var(--warn-soft);color:var(--warn)} .rk-L4{background:var(--bad-soft);color:var(--bad)}
+.tagx{background:transparent;border:1px dashed var(--line-2);color:var(--muted)}
+
+/* bars */
+.bars{display:grid;gap:7px}
+.brow{display:grid;grid-template-columns:96px minmax(0,1fr) 28px;gap:8px;align-items:center;font-size:13px}
+.brow .b{height:10px;border-radius:3px;background:var(--surface-2);overflow:hidden}
+.brow .b i{display:block;height:100%;background:var(--warn);border-radius:3px}
+.brow .n{text-align:right;font-family:var(--mono);font-size:12px}
+
+/* tables */
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{font-size:12px;color:var(--muted);font-weight:500}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+tr:last-child td{border-bottom:0}
+
+/* board */
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.filters select,.filters input[type="search"]{width:auto;min-width:0;max-width:100%}
+.board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(200px,1fr);gap:10px;overflow-x:auto;padding-bottom:8px;scroll-snap-type:x proximity}
+@media (max-width:640px){.board{grid-auto-columns:80%}}
+.col{background:var(--surface-2);border-radius:12px;padding:10px;display:grid;gap:8px;align-content:start;scroll-snap-align:start;min-height:120px}
+.col h3{margin:0 2px 2px;font-size:13px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.col h3 .mono{font-size:12px;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:6px;cursor:pointer;text-align:left;width:100%}
+.card:hover{border-color:var(--line-2)}
+.card .id{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.card .t{font-weight:500;line-height:1.45}
+.card .m{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font-size:12px;color:var(--muted)}
+.card.hot{border-color:var(--bad)}
+
+/* forms */
+.form{display:grid;gap:12px}
+.row{display:grid;gap:12px;grid-template-columns:minmax(0,1fr)}
+@media (min-width:640px){.row.c2{grid-template-columns:repeat(2,minmax(0,1fr))}.row.c3{grid-template-columns:repeat(3,minmax(0,1fr))}.row.c4{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.f{display:grid;gap:4px;font-size:13px;color:var(--ink-2);min-width:0}
+.f > span{font-weight:500}
+input[type="text"],input[type="number"],input[type="search"],input[type="url"],select,textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;min-width:0}
+textarea{resize:vertical;min-height:72px;line-height:1.55}
+textarea.code,pre.code{font-family:var(--mono);font-size:12.5px}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px var(--accent-soft)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;flex-wrap:wrap}
+.seg label{display:flex;align-items:center;cursor:pointer;position:relative}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg span{padding:6px 12px;font-size:13px;font-family:var(--mono);border-right:1px solid var(--line)}
+.seg label:last-child span{border-right:0}
+.seg input:checked + span{background:var(--accent);color:var(--accent-ink)}
+.seg input:focus-visible + span{outline:2px solid var(--accent);outline-offset:-2px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{appearance:none;border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:3px 10px;font-size:13px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--warn-soft);border-color:var(--warn);color:var(--ink)}
+.btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{appearance:none;border:1px solid var(--line-2);background:var(--surface);border-radius:8px;padding:7px 14px;font-size:14px;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--surface-2)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:500}
+.btn.pri:hover{filter:brightness(1.07)}
+.btn.bad{color:var(--bad);border-color:var(--bad)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--accent);padding-inline:8px}
+.btn.sm{padding:4px 10px;font-size:13px}
+.btn:disabled{opacity:.5;cursor:default}
+pre.code{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;white-space:pre;margin:0}
+details.more{border-top:1px solid var(--line);padding-top:10px}
+details.more summary{cursor:pointer;font-size:14px;font-weight:500}
+
+/* rules */
+.rule{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;padding:10px 0;border-bottom:1px solid var(--line)}
+.rule:last-child{border-bottom:0}
+.rule .tx{font-size:14px}
+.rule .m{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+
+/* drawer */
+.backdrop{position:fixed;inset:0;background:rgba(10,20,18,.38);z-index:20}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(600px,100%);background:var(--surface);z-index:21;box-shadow:var(--shadow);display:flex;flex-direction:column}
+.dh{padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 12px;border-bottom:1px solid var(--line);display:grid;gap:8px}
+.dh .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.dh input.title{font-size:17px;font-weight:700;border-color:transparent;background:transparent;padding-inline:4px}
+.dh input.title:hover{border-color:var(--line)}
+.db{overflow-y:auto;padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 24px);display:grid;gap:18px}
+.sec h4{margin:0 0 8px;font-size:13px;font-weight:700;color:var(--ink-2)}
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px 14px;font-size:13px}
+.meta div span{display:block;color:var(--muted);font-size:12px}
+.checks{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.checks li{display:flex;gap:8px;align-items:flex-start;font-size:14px}
+.checks input{margin-top:5px}
+.vlist{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:13px}
+.vlist li{display:flex;gap:8px;align-items:baseline}
+.ok{color:var(--ok)} .bad{color:var(--bad)}
+.hist{list-style:none;margin:0;padding:0;font-size:12px;color:var(--muted);display:grid;gap:2px;font-family:var(--mono)}
+.review{border:1px solid var(--warn);background:var(--warn-soft);border-radius:10px;padding:12px;display:grid;gap:10px}
+
+/* toast & modal */
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 20px);transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:13px;z-index:40;max-width:calc(100% - 32px)}
+.modal{position:fixed;inset:0;z-index:30;display:grid;place-items:center;padding:16px;background:rgba(10,20,18,.38)}
+.modal .box{background:var(--surface);border-radius:14px;box-shadow:var(--shadow);width:min(640px,100%);max-height:88vh;display:grid;grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden}
+.modal .box > header{padding:14px 16px;border-bottom:1px solid var(--line);font-weight:700}
+.modal .box > div{padding:14px 16px;overflow:auto}
+.modal .box > footer{padding:12px 16px;border-top:1px solid var(--line)}
+.modal textarea{min-height:240px}
+.stream{white-space:pre-wrap;font-size:14px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;min-height:80px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head><body>
+<header class="bar"><div class="wrap">
+  <div class="brand"><h1>Agent 工作台</h1><span>agent-hub · 多 Agent 任务 · 评审 · 规则沉淀</span></div>
+  <span class="btns"><span class="sync" id="sync"><i></i><span>连接中…</span></span><button class="btn ghost sm" data-act="logout" title="退出登录">退出</button></span>
+</div></header>
+<nav class="tabs" aria-label="视图"><div class="wrap" role="tablist" id="tabs"></div></nav>
+<div class="wrap"><div id="banner"></div><main id="view" aria-live="polite"></main></div>
+<div id="layer"></div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="/vendor/jszip.min.js"></script>
+<script src="/shim.js"></script>
+<script>
+(function(){
+"use strict";
+/* ---------- constants ---------- */
+const STATUSES = ["待规格","待执行","执行中","需介入","待评审","已合并","已放弃"];
+const OPEN = ["待规格","待执行","执行中","需介入","待评审"];
+const RISKS = ["L1","L2","L3","L4"];
+const RISK_TIP = {L1:"机械型：依赖升级、lint 修复、配置、迁移",L2:"常规型：小功能、缺陷修复、补测试",L3:"复杂型：跨模块、核心逻辑",L4:"高风险：鉴权、资金、数据删除、对外契约"};
+const REASONS = ["规格不清","上下文缺失","越界改动","验证不足","设计问题","代码质量","安全隐患","Agent 能力不足"];
+const TARGETS = ["AGENTS.md","CLAUDE.md",".cursor/rules","评审清单","验证脚本","任务单模板"];
+const DEFAULT_AGENTS = ["Claude Code","Cowork","Codex","Cursor","Copilot","Kiro","Gemini CLI"];
+const TABS = [["today","今日"],["board","看板"],["projects","项目"],["agents","接入"],["capture","录入"],["rules","规则库"],["retro","复盘"],["export","导出与设置"]];
+const NEXT = {
+  "待规格":[["待执行","规格就绪"]],
+  "待执行":[["执行中","开始执行"]],
+  "执行中":[["待评审","提交评审"],["需介入","需要介入"]],
+  "需介入":[["执行中","已处理，继续"],["已放弃","放弃"]],
+  "待评审":[["__merge","评审通过并合并"],["__rework","退回修改"],["已放弃","放弃"]],
+  "已合并":[],"已放弃":[["待执行","重新打开"]]
+};
+
+/* ---------- state ---------- */
+const S = {
+  tab: "today", tasks: [], rules: [], retros: {}, config: {agents: DEFAULT_AGENTS.slice(), projects: []},
+  mode: "loading", openId: null, reviewMode: null, weekOffset: 0,
+  filter: {project: "", agent: "", q: "", closed: false},
+  loaded: {tasks:false, rules:false, retros:false, config:false},
+  cap: {db:null, downloads:null, sample:null},
+  hub: {caps:null, status:null, feed:[], activity:{}, online:true}
+};
+const AI = () => (S.hub.caps && S.hub.caps.llm && S.hub.caps.llm.provider==="anthropic") ? "Claude" : "AI";
+try { const t = localStorage.getItem("awb.tab"); if (t && TABS.some(x=>x[0]===t)) S.tab = t; } catch(e){}
+
+/* ---------- utils ---------- */
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const safeUrl = u => /^https?:\/\//i.test(String(u||"").trim()) ? String(u).trim() : "";
+const nowIso = () => new Date().toISOString();
+const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+const rid = n => Math.random().toString(36).slice(2, 2+n);
+function newTaskId(){ const d=new Date(); const p=x=>String(x).padStart(2,"0"); return "T"+String(d.getFullYear()).slice(2)+p(d.getMonth()+1)+p(d.getDate())+"-"+rid(3); }
+function ago(iso){ if(!iso) return ""; const ms=Date.now()-new Date(iso).getTime(); if(!Number.isFinite(ms)) return ""; const m=Math.round(ms/60000); if(m<1) return "刚刚"; if(m<60) return m+" 分钟前"; const h=Math.round(m/60); if(h<48) return h+" 小时前"; return Math.round(h/24)+" 天前"; }
+function dur(ms){ if(ms==null||!Number.isFinite(ms)||ms<0) return "—"; const m=Math.round(ms/60000); if(m<60) return m+" 分"; const h=m/60; if(h<48) return h.toFixed(1)+" 时"; return (h/24).toFixed(1)+" 天"; }
+function fmtDate(iso){ if(!iso) return "—"; const d=new Date(iso); if(isNaN(d)) return "—"; const p=x=>String(x).padStart(2,"0"); return (d.getMonth()+1)+"/"+d.getDate()+" "+p(d.getHours())+":"+p(d.getMinutes()); }
+function money(v){ return v==null ? "—" : "¥"+(Math.round(v*10)/10).toLocaleString("zh-CN"); }
+function pct(a,b){ return b ? Math.round(a*100/b)+"%" : "—"; }
+function isoWeek(date){ const d=new Date(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate())); const day=d.getUTCDay()||7; d.setUTCDate(d.getUTCDate()+4-day); const y=d.getUTCFullYear(); const w=Math.ceil(((d-Date.UTC(y,0,1))/86400000+1)/7); return y+"-W"+String(w).padStart(2,"0"); }
+function weekRange(offset){ const n=new Date(); const day=(n.getDay()+6)%7; const s=new Date(n.getFullYear(),n.getMonth(),n.getDate()-day+offset*7); const e=new Date(s); e.setDate(s.getDate()+7); return {start:s,end:e,key:isoWeek(s)}; }
+function lastEntered(t, status){ const h=(t.history||[]).filter(x=>x.to===status); return h.length ? h[h.length-1].at : null; }
+function toast(msg){ const el=$("#toast"); el.textContent=msg; el.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>{el.hidden=true;},2600); }
+function fileSafe(s){ return String(s||"").replace(/[\\/:*?"<>|#^\[\]]/g,"-").replace(/\s+/g," ").trim().slice(0,80) || "untitled"; }
+
+/* ---------- store (db or local memory) ---------- */
+const queues = {};
+function enqueue(path, fn){
+  const p = (queues[path] || Promise.resolve()).then(fn).catch(err => { reportErr(err); });
+  queues[path] = p; return p;
+}
+function reportErr(err){
+  const code = err && err.code;
+  if (code === "quota_exceeded") toast("存储已满：请先删除一些旧任务或规则");
+  else if (code === "invalid_argument") { toast("没有写入权限或数据格式不合法"); }
+  else if (code === "resource_exhausted") toast("操作太频繁，请稍后再试");
+  else if (code === "revoked") { S.mode="local"; renderSync(); toast("数据连接已断开"); }
+  else toast("保存失败，请重试");
+}
+function coll(name){ return name==="tasks"?S.tasks:name==="rules"?S.rules:null; }
+function localPut(name, id, data){ if(name==="retros"){ S.retros[id]=Object.assign({id},data); return; } if(name==="config"){ S.config=Object.assign({},S.config,data); return; } const arr=coll(name); const i=arr.findIndex(x=>x.id===id); const doc=Object.assign({id},data); if(i>=0) arr[i]=doc; else arr.push(doc); }
+function localMerge(name, id, patch){ if(name==="retros"){ S.retros[id]=Object.assign({},S.retros[id]||{id},patch); return; } if(name==="config"){ S.config=Object.assign({},S.config,patch); return; } const arr=coll(name); const i=arr.findIndex(x=>x.id===id); if(i>=0) arr[i]=Object.assign({},arr[i],patch); }
+function localDel(name, id){ if(name==="retros"){ delete S.retros[id]; return; } const arr=coll(name); const i=arr.findIndex(x=>x.id===id); if(i>=0) arr.splice(i,1); }
+const store = {
+  set(name, id, data){
+    const body = Object.assign({}, data); delete body.id;
+    if (S.mode !== "db") { localPut(name, id, body); render(); return Promise.resolve(); }
+    return enqueue(name+"/"+id, () => S.cap.db.doc(name+"/"+id).set(body));
+  },
+  update(name, id, patch){
+    if (S.mode !== "db") { localMerge(name, id, patch); render(); return Promise.resolve(); }
+    return enqueue(name+"/"+id, () => S.cap.db.doc(name+"/"+id).update(patch));
+  },
+  del(name, id){
+    if (S.mode !== "db") { localDel(name, id); render(); return Promise.resolve(); }
+    return enqueue(name+"/"+id, () => S.cap.db.doc(name+"/"+id).delete());
+  }
+};
+function getTask(id){ return S.tasks.find(t=>t.id===id); }
+function patchTask(id, patch){ patch.updatedAt = nowIso(); return store.update("tasks", id, patch); }
+function moveTask(t, to, extra){
+  const at = nowIso();
+  const patch = Object.assign({status: to, history: (t.history||[]).concat([{at, from: t.status, to}]).slice(-40)}, extra||{});
+  if (to === "执行中" && !t.startedAt) patch.startedAt = at;
+  if (to === "已合并" || to === "已放弃") patch.doneAt = at; else if (t.doneAt) patch.doneAt = null;
+  return patchTask(t.id, patch);
+}
+function saveConfig(patch){ return store.set("config","main", Object.assign({}, {agents:S.config.agents, projects:S.config.projects}, patch)); }
+/* ---------- metrics ---------- */
+function inRange(iso, s, e){ if(!iso) return false; const t=new Date(iso).getTime(); return t>=s.getTime() && t<e.getTime(); }
+function metrics(tasks, s, e){
+  const created = tasks.filter(t=>inRange(t.createdAt,s,e));
+  const finished = tasks.filter(t=>inRange(t.doneAt,s,e) && (t.status==="已合并"||t.status==="已放弃"));
+  const merged = finished.filter(t=>t.status==="已合并");
+  const dropped = finished.filter(t=>t.status==="已放弃");
+  const firstPass = merged.filter(t=>!(t.reworks||[]).length);
+  const cost = finished.reduce((a,t)=>a+(num(t.cost)||0),0);
+  const cycles = merged.map(t=>new Date(t.doneAt)-new Date(t.startedAt||t.createdAt)).filter(x=>Number.isFinite(x)&&x>=0);
+  const reasons = {};
+  const bump = r => { reasons[r]=(reasons[r]||0)+1; };
+  tasks.forEach(t=>{
+    (t.reworks||[]).forEach(r=>{ if(inRange(r.at,s,e)) (r.reasons||[]).forEach(bump); });
+    if (t.review && inRange(t.review.at,s,e)) (t.review.reasons||[]).forEach(bump);
+    if (t.status==="已放弃" && inRange(t.doneAt,s,e) && t.dropReason) bump(t.dropReason);
+  });
+  return { created, finished, merged, dropped, firstPass, cost,
+    avgCycle: cycles.length ? cycles.reduce((a,b)=>a+b,0)/cycles.length : null,
+    costPerMerged: merged.length ? cost/merged.length : null,
+    reasons: Object.entries(reasons).sort((a,b)=>b[1]-a[1]) };
+}
+function agentStats(tasks, days){
+  const since = Date.now()-days*86400000; const by = {};
+  tasks.forEach(t=>{
+    const a = t.agent || "未指定"; const o = by[a] || (by[a]={agent:a,total:0,fin:0,merged:0,first:0,cost:0,costN:0,mins:0,minsN:0,rework:0});
+    if (new Date(t.createdAt).getTime() >= since) o.total++;
+    if (t.doneAt && new Date(t.doneAt).getTime() >= since){
+      o.fin++; if (t.status==="已合并"){ o.merged++; if(!(t.reworks||[]).length) o.first++; }
+      if (num(t.cost)!=null){ o.cost+=num(t.cost); o.costN++; }
+      if (num(t.minutes)!=null){ o.mins+=num(t.minutes); o.minsN++; }
+    }
+    if (new Date(t.createdAt).getTime() >= since) o.rework += (t.reworks||[]).length;
+  });
+  return Object.values(by).filter(o=>o.total||o.fin).sort((a,b)=>b.total-a.total);
+}
+function attention(){
+  const items = [];
+  S.tasks.forEach(t=>{
+    if (t.status==="需介入") items.push({t, lvl:"bad", pri:0, note:"需介入 · "+(ago(lastEntered(t,"需介入")||t.updatedAt)||"")});
+    else if (t.status==="待评审"){ const w = Date.now()-new Date(lastEntered(t,"待评审")||t.updatedAt||t.createdAt); items.push({t, lvl:"warn", pri:1, wait:w, note:"待评审 · 已等待 "+dur(w)}); }
+    else if (t.status==="执行中" && num(t.budgetMin) && t.startedAt){ const run=(Date.now()-new Date(t.startedAt))/60000; if(run>num(t.budgetMin)) items.push({t, lvl:"acc", pri:2, note:"超出时长预算 · 已运行 "+dur(run*60000)+" / 预算 "+t.budgetMin+" 分"}); }
+  });
+  return items.sort((a,b)=>a.pri-b.pri || (b.wait||0)-(a.wait||0));
+}
+
+/* ---------- render framework ---------- */
+let lastKey = "";
+function render(){
+  renderTabs(); renderSync(); renderBanner();
+  const key = S.tab + "|" + (S.openId||"") + "|" + (S.reviewMode||"");
+  const preserve = key === lastKey; lastKey = key;
+  withPreserved($("#view"), preserve, () => { $("#view").innerHTML = VIEWS[S.tab](); });
+  withPreserved($("#layer"), preserve, () => { $("#layer").innerHTML = S.openId && getTask(S.openId) ? drawerHtml(getTask(S.openId)) : ""; });
+}
+function withPreserved(root, preserve, fn){
+  if (!preserve) { fn(); return; }
+  const vals = {};
+  $$("input[id],textarea[id],select[id]", root).forEach(el => { vals[el.id] = (el.type==="checkbox"||el.type==="radio") ? {c:el.checked} : {v:el.value}; });
+  const a = document.activeElement; const act = a && root.contains(a) && a.id ? a.id : null;
+  let sel = null; try { if (act && a.selectionStart!=null) sel = [a.selectionStart, a.selectionEnd]; } catch(e){}
+  const scrollers = $$("[data-keep-scroll]", root).map(el=>[el.dataset.keepScroll, el.scrollTop, el.scrollLeft]);
+  fn();
+  Object.entries(vals).forEach(([id,s]) => { const el = document.getElementById(id); if (!el || !root.contains(el)) return; if ("c" in s) el.checked = s.c; else if (el.value !== s.v) el.value = s.v; });
+  scrollers.forEach(([k,t,l])=>{ const el=root.querySelector('[data-keep-scroll="'+k+'"]'); if(el){ el.scrollTop=t; el.scrollLeft=l; } });
+  if (act) { const el = document.getElementById(act); if (el) { el.focus({preventScroll:true}); if (sel && el.setSelectionRange) try { el.setSelectionRange(sel[0], sel[1]); } catch(e){} } }
+}
+function renderTabs(){
+  const need = S.tasks.filter(t=>t.status==="需介入"||t.status==="待评审").length;
+  const pendingRules = S.rules.filter(r=>r.status==="待写入").length;
+  $("#tabs").innerHTML = TABS.map(([k,l]) => {
+    const c = k==="today" && need ? '<span class="cnt">'+need+'</span>' : k==="rules" && pendingRules ? '<span class="cnt">'+pendingRules+'</span>' : "";
+    return '<button class="tab" role="tab" id="tab-'+k+'" data-act="tab" data-k="'+k+'" aria-selected="'+(S.tab===k)+'">'+l+c+'</button>';
+  }).join("");
+}
+function renderSync(){
+  const el = $("#sync");
+  el.className = "sync " + (S.mode==="db" ? "on" : S.mode==="local" ? "off" : "");
+  el.lastElementChild.textContent = S.mode==="db" ? "已同步" : S.mode==="local" ? "本地模式" : "连接中…";
+}
+function renderBanner(){
+  $("#banner").innerHTML = S.mode==="local" ? '<div class="banner">没有连接到 agent-hub：请登录后刷新页面。改动只保留在本次打开的页面里。</div>' : (!S.hub.online ? '<div class="banner">与 agent-hub 的实时连接中断，正在重连…</div>' : "");
+}
+
+/* ---------- small html helpers ---------- */
+const rulePill = s => '<span class="pill '+(s==="已写入"?"st-已合并":s==="已废弃"?"st-已放弃":"st-待评审")+'">'+esc(s)+'</span>';
+const stPill = s => '<span class="pill st-'+esc(s)+'">'+esc(s)+'</span>';
+const rkPill = r => r ? '<span class="pill mono rk-'+esc(r)+'" title="'+esc(RISK_TIP[r]||"")+'">'+esc(r)+'</span>' : "";
+const opt = (v, cur, label) => '<option value="'+esc(v)+'"'+(v===cur?" selected":"")+'>'+esc(label==null?v:label)+'</option>';
+function projectOptions(cur, withAll){ const ps = S.config.projects.map(p=>p.name); if (cur && !ps.includes(cur)) ps.push(cur); return (withAll?opt("",cur,"全部项目"):opt("",cur,"未指定"))+ps.map(p=>opt(p,cur)).join(""); }
+function agentOptions(cur, withAll){ const as = S.config.agents.slice(); if (cur && !as.includes(cur)) as.push(cur); return (withAll?opt("",cur,"全部 Agent"):opt("",cur,"未指定"))+as.map(a=>opt(a,cur)).join(""); }
+function sampleBadge(t){ return t.sample ? '<span class="pill tagx">示例</span>' : ""; }
+
+/* ---------- view: today ---------- */
+function viewToday(){
+  if (!S.loaded.tasks && S.mode==="loading") return '<div class="empty">正在加载…</div>';
+  const now = new Date(); const s = new Date(now.getTime()-7*86400000);
+  const m = metrics(S.tasks, s, new Date(now.getTime()+1));
+  const att = attention();
+  const pendingRules = S.rules.filter(r=>r.status==="待写入");
+  const running = S.tasks.filter(t=>t.status==="执行中").length;
+  const openN = S.tasks.filter(t=>OPEN.includes(t.status)).length;
+  const kp = [
+    ["进行中任务", openN, "其中执行中 "+running],
+    ["近 7 天新建", m.created.length, "任务"],
+    ["近 7 天合并", m.merged.length, "放弃 "+m.dropped.length],
+    ["合并率", pct(m.merged.length, m.finished.length), "已结束 "+m.finished.length],
+    ["一次通过率", pct(m.firstPass.length, m.merged.length), "未经退回即合并"],
+    ["每合并成本", money(m.costPerMerged), "平均周期 "+dur(m.avgCycle)]
+  ];
+  const attHtml = (att.length || pendingRules.length) ? '<ul class="alist">' +
+    att.map(x=>'<li><button class="aitem" data-act="open" data-id="'+esc(x.t.id)+'"><span class="stripe '+x.lvl+'"></span><span style="min-width:0"><div class="t">'+esc(x.t.title||"(未命名)")+'</div><div class="m">'+esc(x.note)+' · '+esc(x.t.agent||"未指定 Agent")+(x.t.project?' · '+esc(x.t.project):'')+'</div></span>'+rkPill(x.t.risk)+'</button></li>').join("") +
+    (pendingRules.length ? '<li><button class="aitem" data-act="tab" data-k="rules"><span class="stripe"></span><span><div class="t">'+pendingRules.length+' 条规则等待写入规则文件</div><div class="m">写进 AGENTS.md 等文件后，在规则库里标记为已写入</div></span><span class="pill">规则库</span></button></li>' : "") +
+    '</ul>' : '<div class="empty">没有需要你处理的事项。</div>';
+  const maxR = m.reasons.length ? m.reasons[0][1] : 1;
+  const reasonsHtml = m.reasons.length ? '<div class="bars">'+m.reasons.slice(0,6).map(([r,n])=>'<div class="brow"><span>'+esc(r)+'</span><span class="b"><i style="width:'+Math.max(6,Math.round(n*100/maxR))+'%"></i></span><span class="n">'+n+'</span></div>').join("")+'</div>' : '<div class="empty">近 7 天没有退回或问题记录。</div>';
+  const ag = agentStats(S.tasks, 30);
+  const agHtml = ag.length ? '<div class="tbl"><table><thead><tr><th>Agent</th><th class="num">新建</th><th class="num">合并率</th><th class="num">一次通过</th><th class="num">退回次数</th><th class="num">均耗时</th><th class="num">均成本</th></tr></thead><tbody>'+
+    ag.map(o=>'<tr><td>'+esc(o.agent)+'</td><td class="num">'+o.total+'</td><td class="num">'+pct(o.merged,o.fin)+'</td><td class="num">'+pct(o.first,o.merged)+'</td><td class="num">'+o.rework+'</td><td class="num">'+(o.minsN?Math.round(o.mins/o.minsN)+" 分":"—")+'</td><td class="num">'+(o.costN?money(o.cost/o.costN):"—")+'</td></tr>').join("")+'</tbody></table></div>' : '<div class="empty">还没有数据。</div>';
+  const projHtml = S.config.projects.length ? '<div class="tbl"><table><thead><tr><th>项目</th><th class="num">进行中</th><th>接入</th><th>统一验证</th></tr></thead><tbody>'+
+    S.config.projects.map(p=>{ const n=S.tasks.filter(t=>t.project===p.name&&OPEN.includes(t.status)).length; const k=onboardCount(p); return '<tr><td>'+esc(p.name)+'</td><td class="num">'+n+'</td><td><span class="pill '+(k>=ONBOARD.length?"st-已合并":k?"st-待评审":"st-需介入")+'">'+k+'/'+ONBOARD.length+'</span></td><td>'+(lines(p.verify).length?'<span class="small">已配置</span>':'<span class="small bad">未配置</span>')+'</td></tr>'; }).join("")+'</tbody></table></div><div class="btns" style="margin-top:8px"><button class="btn ghost sm" data-act="tab" data-k="projects">去项目页</button></div>' : '<div class="empty">在“项目”页添加项目。</div>';
+  return '<div class="stack">'+
+    '<div class="kpis">'+kp.map(k=>'<div class="kpi"><div class="l">'+k[0]+'</div><div class="v">'+k[1]+'</div><div class="s">'+esc(k[2])+'</div></div>').join("")+'</div>'+
+    '<div class="grid2"><div class="panel"><h2>需要我处理 <small>'+(att.length+(pendingRules.length?1:0))+' 项</small></h2>'+attHtml+'</div>'+
+    '<div class="stack"><div class="panel"><h2>问题归因 <small>近 7 天</small></h2>'+reasonsHtml+'</div>'+
+    '<div class="panel"><h2>项目接入</h2>'+projHtml+'</div></div></div>'+
+    '<div class="grid2"><div class="panel"><h2>Agent 对比 <small>近 30 天</small></h2>'+agHtml+'</div>'+
+    '<div class="panel"><h2>最近 Agent 活动 <small>实时 · <a href="#" data-act="tab" data-k="agents">接入状态</a></small></h2>'+feedHtml(S.hub.feed.slice(0,12), true)+'</div></div>'+
+  '</div>';
+}
+
+/* ---------- view: board ---------- */
+function viewBoard(){
+  const f = S.filter; const q = f.q.trim().toLowerCase();
+  const list = S.tasks.filter(t => (!f.project||t.project===f.project) && (!f.agent||t.agent===f.agent) && (!q || (t.title||"").toLowerCase().includes(q) || (t.id||"").toLowerCase().includes(q)));
+  const cols = f.closed ? STATUSES : STATUSES.filter(s=>s!=="已放弃");
+  const cutoff = Date.now()-14*86400000;
+  const colHtml = cols.map(st => {
+    let items = list.filter(t=>t.status===st);
+    if (st==="已合并" && !f.closed) items = items.filter(t=>new Date(t.doneAt||t.updatedAt).getTime()>=cutoff);
+    items.sort((a,b)=> String(b.updatedAt||b.createdAt).localeCompare(String(a.updatedAt||a.createdAt)));
+    return '<section class="col" aria-label="'+st+'"><h3>'+stPill(st)+'<span class="mono">'+items.length+'</span></h3>'+
+      (items.length ? items.map(cardHtml).join("") : '<div class="empty">—</div>')+'</section>';
+  }).join("");
+  return '<div class="filters">'+
+    '<select id="f-project" data-act="filter" data-k="project" aria-label="按项目筛选">'+projectOptions(f.project,true)+'</select>'+
+    '<select id="f-agent" data-act="filter" data-k="agent" aria-label="按 Agent 筛选">'+agentOptions(f.agent,true)+'</select>'+
+    '<input type="search" id="f-q" data-act="filter" data-k="q" placeholder="搜索标题或编号" value="'+esc(f.q)+'" style="max-width:220px">'+
+    '<label class="small"><input type="checkbox" id="f-closed" data-act="filter" data-k="closed"'+(f.closed?" checked":"")+'> 显示全部已结束</label>'+
+    '<button class="btn pri sm" data-act="tab" data-k="capture">新建任务</button></div>'+
+    '<div class="board" data-keep-scroll="board">'+colHtml+'</div>'+
+    '<p class="hint" style="margin-top:8px">“已合并”默认只显示近 14 天。点开卡片可推进状态、记录评审和交付回执。</p>';
+}
+function cardHtml(t){
+  const rw = (t.reworks||[]).length;
+  const wait = t.status==="待评审" ? "等待 "+dur(Date.now()-new Date(lastEntered(t,"待评审")||t.updatedAt||t.createdAt)) : t.status==="执行中" && t.startedAt ? "已运行 "+dur(Date.now()-new Date(t.startedAt)) : ago(t.updatedAt||t.createdAt);
+  return '<button class="card'+(t.status==="需介入"?" hot":"")+'" data-act="open" data-id="'+esc(t.id)+'">'+
+    '<span class="id">'+esc(t.id)+' '+sampleBadge(t)+'</span><span class="t">'+esc(t.title||"(未命名)")+'</span>'+
+    '<span class="m">'+rkPill(t.risk)+'<span>'+esc(t.agent||"未指定")+'</span>'+(t.project?'<span>'+esc(t.project)+'</span>':'')+'</span>'+
+    '<span class="m"><span>'+esc(wait)+'</span>'+(num(t.cost)!=null?'<span class="mono">'+money(num(t.cost))+'</span>':'')+(rw?'<span class="pill st-待评审">退回 '+rw+'</span>':'')+'</span></button>';
+}
+/* ---------- receipt ---------- */
+const RECEIPT_TEMPLATE = [
+"## 交付回执（每次任务结束时必须输出）",
+"任务结束时，在回复末尾输出下面格式的代码块，字段不要省略；不确定的写 unknown。",
+"如果可以使用 agent-hub 的 MCP 工具，同时调用 submit_receipt 提交同样的内容。",
+"",
+"```agent-receipt",
+"task: <任务编号，如 T260922-a1b>",
+"status: done | blocked",
+"summary: <一句话说明做了什么>",
+"changed:",
+"  - <改动的文件路径>",
+"verify:",
+"  - <执行的验证命令>: pass | fail",
+"scope: ok | <超出任务范围的改动及原因>",
+"risks: <已知风险或未完成事项，没有写 无>",
+"session: <会话链接或编号>",
+"minutes: <大约耗时，分钟>",
+"ci_rounds: <CI 运行轮数>",
+"```"].join("\n");
+function parseReceipt(raw){
+  let text = String(raw||"");
+  const m = text.match(/```\s*agent-receipt\s*\n([\s\S]*?)```/i);
+  if (m) text = m[1];
+  const out = {}; let cur = null;
+  text.split(/\r?\n/).forEach(line => {
+    const clean = line.replace(/\s+#\s.*$/, "");
+    if (!clean.trim()) return;
+    const li = clean.match(/^\s*[-*]\s+(.*)$/);
+    if (li && cur){ (out[cur] = Array.isArray(out[cur]) ? out[cur] : []).push(li[1].trim()); return; }
+    const kv = clean.match(/^\s*([A-Za-z_]+)\s*[:：]\s*(.*)$/);
+    if (kv){ cur = kv[1].toLowerCase(); const v = kv[2].trim(); out[cur] = v === "" ? [] : v; }
+  });
+  if (!out.task && !out.summary && !out.changed) return null;
+  const list = v => Array.isArray(v) ? v : (v ? String(v).split(/[,，]\s*/).filter(Boolean) : []);
+  const verify = list(out.verify).map(s => { const mm = s.match(/^(.*?)\s*[:：]\s*(pass|fail|通过|失败|ok|unknown)\s*$/i); return mm ? {cmd: mm[1].trim(), result: /pass|通过|ok/i.test(mm[2]) ? "pass" : /fail|失败/i.test(mm[2]) ? "fail" : "unknown"} : {cmd: s, result: "unknown"}; });
+  const st = String(out.status||"").toLowerCase();
+  return {
+    task: typeof out.task==="string" ? out.task.replace(/[<>]/g,"").trim() : "",
+    status: /block|阻塞|失败|fail/.test(st) ? "blocked" : "done",
+    summary: typeof out.summary==="string" ? out.summary : "",
+    changed: list(out.changed),
+    verify,
+    scope: typeof out.scope==="string" ? out.scope : "",
+    risks: typeof out.risks==="string" ? out.risks : "",
+    session: typeof out.session==="string" ? out.session : "",
+    cost: num(out.cost), minutes: num(out.minutes), ciRounds: num(out.ci_rounds), lines: num(out.lines)
+  };
+}
+function receiptPatch(t, r){
+  const patch = { receipt: {summary:r.summary||"", changed:(r.changed||[]).slice(0,200), verify:(r.verify||[]).slice(0,50), scope:r.scope||"", risks:r.risks||"", at: nowIso()} };
+  if (r.session && !/^unknown$/i.test(r.session)) patch.session = r.session;
+  if (r.cost!=null) patch.cost = r.cost;
+  if (r.minutes!=null) patch.minutes = r.minutes;
+  if (r.ciRounds!=null) patch.ciRounds = r.ciRounds;
+  if (r.lines!=null) patch.lines = r.lines;
+  const bad = r.status==="blocked" || (r.verify||[]).some(v=>v.result==="fail");
+  return {patch, to: bad ? "需介入" : "待评审"};
+}
+function scopeOk(s){ return !s || /^(ok|无|none|没有)$/i.test(String(s).trim()); }
+
+/* ---------- task brief (hand to any agent) ---------- */
+function relevantRules(project){ return S.rules.filter(r => r.status!=="已废弃" && (!r.scope || r.scope==="全局" || r.scope===project)); }
+function taskBrief(t){
+  const L = [];
+  L.push("# 任务 "+t.id+"："+(t.title||""));
+  L.push("- 项目："+(t.project||"未指定")+" ｜ 风险等级："+(t.risk||"未定")+" ｜ 执行 Agent："+(t.agent||"未指定"));
+  L.push("", "## 目标", t.goal || "（待补充）");
+  L.push("", "## 验收标准（每条都要可验证）");
+  (t.acceptance||[]).length ? t.acceptance.forEach(a=>L.push("- [ ] "+a.text)) : L.push("- [ ] （待补充）");
+  L.push("", "## 范围", "- 允许修改："+(t.allow||"未限定"), "- 禁止修改："+(t.deny||"无额外限制"));
+  if (t.spec) L.push("", "## 规格", t.spec);
+  L.push("", "## 预算", "- 时长 ≤ "+(t.budgetMin||60)+" 分钟；验证最多修 3 轮。超出时停止，并在回执中说明原因。");
+  const pj = projByName(t.project);
+  if (pj && !(pj.onboard||{}).kit){ const inv = lines(pj.invariants).concat(lines(pj.forbidden)); if (inv.length){ L.push("", "## 项目约束"); inv.forEach(x=>L.push("- "+x)); } if (lines(pj.verify).length){ L.push("", "## 验证命令"); lines(pj.verify).forEach(x=>L.push("- `"+x+"`")); } }
+  if ((t.reworks||[]).length){ const r=t.reworks[t.reworks.length-1]; L.push("", "## 上次评审退回（请先处理）", "- 原因："+(r.reasons||[]).join("、")); if (r.note) L.push("- 说明："+r.note); }
+  L.push("", "## 工作方式", "- 在当前分支和目录中工作，不要切换、合并或删除分支", "- 提交信息末尾带 `Task: "+t.id+"`（git 钩子会自动补）");
+  const pend = relevantRules(t.project).filter(r=>r.status==="待写入" || !(pj && (pj.onboard||{}).kit));
+  if (pend.length){ L.push("", "## 额外规则（尚未写入规则文件）"); pend.forEach(r=>L.push("- "+r.text)); }
+  L.push("", "## 完成后", "按 AGENTS.md 中的“交付回执”格式输出回执，task 填 "+t.id+"；能用 agent-hub MCP 时同时调用 submit_receipt。若没有该格式，使用：", "", RECEIPT_TEMPLATE.split("\n").slice(4).join("\n"));
+  return L.join("\n");
+}
+
+/* ---------- view: capture ---------- */
+function viewCapture(){
+  const rp = S.receiptPreview;
+  const openTasks = S.tasks.filter(t=>OPEN.includes(t.status)).sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
+  let prevHtml = "";
+  if (rp && rp.error) prevHtml = '<p class="hint bad">'+esc(rp.error)+'</p>';
+  else if (rp && rp.data){
+    const r = rp.data; const match = getTask(r.task);
+    const {to} = receiptPatch(match||{}, r);
+    prevHtml = '<div class="panel" style="background:var(--bg)"><h2>解析结果 <small>'+(rp.by==="claude"?"由 "+AI()+" 解析":"按回执格式解析")+'</small></h2>'+
+      '<div class="meta"><div><span>任务编号</span>'+esc(r.task||"未提供")+'</div><div><span>结果</span>'+(r.status==="blocked"?'<span class="bad">阻塞</span>':'完成')+'</div><div><span>耗时</span>'+(r.minutes!=null?r.minutes+" 分":"—")+'</div><div><span>CI 轮次</span>'+(r.ciRounds!=null?r.ciRounds:"—")+'</div></div>'+
+      '<p style="margin:10px 0 6px">'+esc(r.summary||"（无摘要）")+'</p>'+
+      (r.verify.length?'<ul class="vlist">'+r.verify.map(v=>'<li><span class="'+(v.result==="pass"?"ok":v.result==="fail"?"bad":"muted")+'">'+(v.result==="pass"?"通过":v.result==="fail"?"失败":"未知")+'</span><code class="mono small">'+esc(v.cmd)+'</code></li>').join("")+'</ul>':'')+
+      (!scopeOk(r.scope)?'<p class="small bad" style="margin:8px 0 0">范围声明：'+esc(r.scope)+'</p>':'')+
+      '<div class="form" style="margin-top:12px"><label class="f"><span>写入到任务</span><select id="r-task">'+
+        opt("__new","", "新建一个任务")+openTasks.map(t=>opt(t.id, match?match.id:"", t.id+" · "+(t.title||""))).join("")+'</select></label>'+
+      '<p class="hint" style="margin:0">写入后状态将变为 '+stPill(to)+(to==="需介入"?"（回执显示阻塞或验证失败）":"")+'</p>'+
+      '<div class="btns"><button class="btn pri" data-act="apply-receipt">写入任务</button><button class="btn ghost" data-act="clear-receipt">清空</button></div></div></div>';
+  }
+  return '<div class="grid2">'+
+  '<div class="panel"><h2>新建任务</h2><p class="hint">填好后可以直接复制任务单发给任意 Agent。带 * 的必填。</p><div class="form">'+
+    '<label class="f"><span>标题 *</span><input type="text" id="n-title" placeholder="例如：订单导出改为异步任务"></label>'+
+    '<div class="row c3"><label class="f"><span>项目</span><select id="n-project">'+projectOptions("")+'</select></label>'+
+    '<label class="f"><span>Agent</span><select id="n-agent">'+agentOptions(S.config.agents[0]||"")+'</select></label>'+
+    '<label class="f"><span>初始状态</span><select id="n-status">'+["待规格","待执行","执行中"].map(s=>opt(s,"待执行")).join("")+'</select></label></div>'+
+    '<div class="f" role="radiogroup" aria-label="风险等级"><span class="small" style="font-weight:500;color:var(--ink-2)">风险等级</span><div class="seg">'+RISKS.map(r=>'<label title="'+esc(RISK_TIP[r])+'"><input type="radio" name="n-risk" id="n-risk-'+r+'" value="'+r+'"'+(r==="L2"?" checked":"")+'><span>'+r+'</span></label>').join("")+'</div><span class="small muted" id="n-risk-tip">'+esc(RISK_TIP.L2)+'</span></div>'+
+    '<label class="f"><span>目标</span><textarea id="n-goal" placeholder="为什么做、做完后有什么变化"></textarea></label>'+
+    '<label class="f"><span>验收标准（每行一条，尽量可验证）</span><textarea id="n-acc" placeholder="当导出超过 10,000 行时，改为异步生成并通知用户&#10;make test 全部通过"></textarea></label>'+
+    '<div class="row c2"><label class="f"><span>允许修改</span><input type="text" id="n-allow" placeholder="src/order/**"></label><label class="f"><span>禁止修改</span><input type="text" id="n-deny" placeholder="db/migrations/**"></label></div>'+
+    '<div class="row c3"><label class="f"><span>时长预算（分钟）</span><input type="number" id="n-budget" min="0" step="5" value="60"></label><label class="f"><span>规格链接</span><input type="text" id="n-spec" placeholder="specs/… 或 URL"></label><label class="f"><span>分支</span><input type="text" id="n-branch" placeholder="agent/…"></label></div>'+
+    '<div class="btns"><button class="btn pri" data-act="create">创建任务</button><button class="btn" data-act="create" data-copy="1">创建并复制任务单</button></div>'+
+  '</div></div>'+
+  '<div class="stack"><div class="panel"><h2>粘贴交付回执</h2><p class="hint">接入了钩子或 MCP 的 Agent 会自动回传回执，这里是兜底：把 Agent 结束时的输出贴进来。按回执格式的内容会直接解析；格式不对时可以让 '+AI()+' 帮忙提取。</p><div class="form">'+
+    '<textarea id="r-text" class="code" placeholder="```agent-receipt&#10;task: T260922-a1b&#10;status: done&#10;summary: …&#10;```"></textarea>'+
+    '<div class="btns"><button class="btn pri" data-act="parse-receipt">解析</button>'+(S.cap.sample?'<button class="btn" data-act="parse-receipt-ai">让 '+AI()+' 解析</button>':'')+'</div>'+prevHtml+'</div></div>'+
+  '<div class="panel"><h2>回执格式 <small>接入包已写进每个项目的 AGENTS.md</small></h2><p class="hint">Claude Code、Codex、Cursor、Copilot、Kiro 都会读取仓库里的 AGENTS.md。结束钩子会从 Agent 的最后一条回复里提取这个代码块，自动写入任务。</p>'+
+    '<pre class="code">'+esc(RECEIPT_TEMPLATE)+'</pre><div class="btns" style="margin-top:10px"><button class="btn sm" data-act="copy" data-what="receipt-template">复制</button></div></div></div>'+
+  '</div>';
+}
+/* ---------- view: rules ---------- */
+function ruleItem(r){
+  const src = r.sourceTask && getTask(r.sourceTask) ? '<button class="btn ghost sm" data-act="open" data-id="'+esc(r.sourceTask)+'">来源 '+esc(r.sourceTask)+'</button>' : (r.sourceTask ? '<span>来源 '+esc(r.sourceTask)+'</span>' : '');
+  const acts = r.status==="待写入"
+    ? '<button class="btn sm" data-act="rule-status" data-id="'+esc(r.id)+'" data-to="已写入">已写入文件</button><button class="btn sm" data-act="rule-hit" data-id="'+esc(r.id)+'">又出现一次</button><button class="btn ghost sm" data-act="rule-status" data-id="'+esc(r.id)+'" data-to="已废弃">废弃</button>'
+    : r.status==="已写入" ? '<button class="btn sm" data-act="rule-hit" data-id="'+esc(r.id)+'">又出现一次</button><button class="btn ghost sm" data-act="rule-status" data-id="'+esc(r.id)+'" data-to="已废弃">废弃</button>'
+    : '<button class="btn ghost sm" data-act="rule-status" data-id="'+esc(r.id)+'" data-to="待写入">恢复</button><button class="btn ghost sm bad" data-act="rule-del" data-id="'+esc(r.id)+'">删除</button>';
+  return '<div class="rule"><div class="tx">'+esc(r.text)+'</div><div class="m"><span class="pill">'+esc(r.target||"AGENTS.md")+'</span><span class="pill">'+esc(r.scope||"全局")+'</span>'+(r.hits>1?'<span class="pill st-待评审">出现 '+r.hits+' 次</span>':'')+src+'<span>'+esc(ago(r.createdAt))+'</span></div><div class="btns">'+acts+'</div></div>';
+}
+function viewRules(){
+  const by = s => S.rules.filter(r=>r.status===s).sort((a,b)=>(b.hits||1)-(a.hits||1) || String(b.createdAt).localeCompare(String(a.createdAt)));
+  const pend = by("待写入"), done = by("已写入"), dead = by("已废弃");
+  const sg = S.ruleSuggest;
+  let sgHtml = "";
+  if (sg){
+    if (sg.loading) sgHtml = '<div class="stream">正在分析近 30 天的退回记录…</div>';
+    else if (sg.error) sgHtml = '<p class="hint bad">'+esc(sg.error)+'</p>';
+    else if (sg.items) sgHtml = sg.items.length ? sg.items.map((x,i)=>'<div class="rule"><div class="tx">'+esc(x.text)+'</div><div class="m"><span class="pill">'+esc(x.target)+'</span><span class="pill">'+esc(x.scope)+'</span><span>'+esc(x.why||"")+'</span></div><div class="btns">'+(x.added?'<span class="small ok">已加入</span>':'<button class="btn sm" data-act="add-suggest" data-i="'+i+'">加入规则库</button>')+'</div></div>').join("") : '<p class="hint">没有发现需要规则化的共性问题。</p>';
+  }
+  return '<div class="grid2"><div class="stack">'+
+    '<div class="panel"><h2>待写入 <small>'+pend.length+' 条 · 写进规则文件后标记</small></h2>'+(pend.length?pend.map(ruleItem).join(""):'<div class="empty">没有待写入的规则。</div>')+'</div>'+
+    '<div class="panel"><h2>已写入 <small>'+done.length+' 条</small></h2>'+(done.length?done.map(ruleItem).join(""):'<div class="empty">—</div>')+
+      (dead.length?'<details class="more" style="margin-top:10px"><summary>已废弃（'+dead.length+'）</summary>'+dead.map(ruleItem).join("")+'</details>':'')+'</div>'+
+  '</div><div class="stack">'+
+    '<div class="panel"><h2>新增规则</h2><p class="hint">同一类评审意见出现两次，就该变成规则或自动检查。</p><div class="form">'+
+      '<label class="f"><span>规则内容</span><textarea id="ru-text" placeholder="例如：不通过修改或删除测试让检查变绿"></textarea></label>'+
+      '<div class="row c2"><label class="f"><span>写入位置</span><select id="ru-target">'+TARGETS.map(x=>opt(x,"AGENTS.md")).join("")+'</select></label>'+
+      '<label class="f"><span>适用范围</span><select id="ru-scope">'+opt("全局","全局")+S.config.projects.map(p=>opt(p.name,"")).join("")+'</select></label></div>'+
+      '<div class="btns"><button class="btn pri" data-act="add-rule">加入规则库</button><button class="btn" data-act="export-rules">生成规则文件片段</button></div></div></div>'+
+    (S.cap.sample?'<div class="panel"><h2>让 '+AI()+' 提炼规则</h2><p class="hint">读取近 30 天的退回原因和评审备注，找出反复出现的问题，给出规则建议。会调用 hub 配置的模型（LLM_*）。</p><div class="btns" style="margin-bottom:10px"><button class="btn" data-act="suggest-rules"'+(sg&&sg.loading?" disabled":"")+'>生成建议</button></div>'+sgHtml+'</div>':'')+
+  '</div></div>';
+}
+function rulesSnippet(){
+  const live = S.rules.filter(r=>r.status!=="已废弃");
+  const groups = {};
+  live.forEach(r=>{ const k=(r.target||"AGENTS.md")+"｜"+(r.scope||"全局"); (groups[k]=groups[k]||[]).push(r); });
+  const L = ["<!-- 由 Agent 工作台生成："+new Date().toLocaleString("zh-CN")+" -->"];
+  Object.keys(groups).sort().forEach(k=>{ const [target,scope]=k.split("｜"); L.push("", "## "+target+" · "+scope); groups[k].forEach(r=>L.push("- "+r.text+(r.status==="待写入"?"  <!-- 新增 -->":""))); });
+  return L.join("\n");
+}
+
+/* ---------- view: retro ---------- */
+function viewRetro(){
+  const w = weekRange(S.weekOffset); const m = metrics(S.tasks, w.start, w.end);
+  const endShow = new Date(w.end.getTime()-86400000);
+  const retro = S.retros[w.key] || {};
+  const problem = S.tasks.filter(t => (t.reworks||[]).some(r=>inRange(r.at,w.start,w.end)) || (t.status==="已放弃" && inRange(t.doneAt,w.start,w.end)));
+  const newRules = S.rules.filter(r=>inRange(r.createdAt,w.start,w.end));
+  const maxR = m.reasons.length ? m.reasons[0][1] : 1;
+  const kp = [["新建",m.created.length],["合并",m.merged.length],["放弃",m.dropped.length],["合并率",pct(m.merged.length,m.finished.length)],["一次通过率",pct(m.firstPass.length,m.merged.length)],["总成本",money(m.cost)],["平均周期",dur(m.avgCycle)]];
+  const rv = S.retroDraft;
+  return '<div class="stack">'+
+    '<div class="btns"><button class="btn sm" data-act="week" data-d="-1">上一周</button><strong class="mono">'+esc(w.key)+'</strong><span class="muted small">'+(w.start.getMonth()+1)+'/'+w.start.getDate()+' – '+(endShow.getMonth()+1)+'/'+endShow.getDate()+'</span><button class="btn sm" data-act="week" data-d="1"'+(S.weekOffset>=0?" disabled":"")+'>下一周</button>'+(S.weekOffset?'<button class="btn ghost sm" data-act="week" data-d="0">回到本周</button>':'')+'</div>'+
+    '<div class="kpis">'+kp.map(k=>'<div class="kpi"><div class="l">'+k[0]+'</div><div class="v">'+k[1]+'</div></div>').join("")+'</div>'+
+    '<div class="grid2"><div class="stack">'+
+      '<div class="panel"><h2>问题归因</h2>'+(m.reasons.length?'<div class="bars">'+m.reasons.map(([r,n])=>'<div class="brow"><span>'+esc(r)+'</span><span class="b"><i style="width:'+Math.max(6,Math.round(n*100/maxR))+'%"></i></span><span class="n">'+n+'</span></div>').join("")+'</div>':'<div class="empty">本周没有问题记录。</div>')+'</div>'+
+      '<div class="panel"><h2>退回或放弃的任务 <small>'+problem.length+'</small></h2>'+(problem.length?'<ul class="alist">'+problem.map(t=>'<li><button class="aitem" data-act="open" data-id="'+esc(t.id)+'"><span class="stripe '+(t.status==="已放弃"?"":"warn")+'"></span><span style="min-width:0"><div class="t">'+esc(t.title)+'</div><div class="m">'+esc(t.agent||"")+' · '+esc([...new Set((t.reworks||[]).flatMap(r=>r.reasons||[]).concat(t.dropReason?[t.dropReason]:[]))].join("、")||"未归因")+'</div></span>'+stPill(t.status)+'</button></li>').join("")+'</ul>':'<div class="empty">—</div>')+'</div>'+
+      '<div class="panel"><h2>本周新增规则 <small>'+newRules.length+'</small></h2>'+(newRules.length?newRules.map(r=>'<div class="rule"><div class="tx">'+esc(r.text)+'</div><div class="m"><span class="pill">'+esc(r.target)+'</span>'+rulePill(r.status)+'</div></div>').join(""):'<div class="empty">—</div>')+'</div>'+
+    '</div><div class="panel"><h2>复盘笔记 <small>'+(retro.updatedAt?"保存于 "+esc(fmtDate(retro.updatedAt)):"未保存")+'</small></h2><div class="form">'+
+      '<label class="f"><span>本周观察</span><textarea id="rt-notes" style="min-height:180px" placeholder="哪些任务适合交给 Agent？哪里反复出问题？">'+esc(retro.notes||"")+'</textarea></label>'+
+      '<label class="f"><span>下周行动</span><textarea id="rt-actions" placeholder="每行一条">'+esc(retro.actions||"")+'</textarea></label>'+
+      '<div class="btns"><button class="btn pri" data-act="save-retro" data-week="'+esc(w.key)+'">保存</button>'+(S.cap.sample?'<button class="btn" data-act="draft-retro">让 '+AI()+' 起草</button>':'')+'</div>'+
+      (rv ? '<div class="stack"><div class="stream" id="rt-stream">'+esc(rv.text || (rv.loading?"正在思考…":""))+'</div>'+(rv.error?'<p class="hint bad">'+esc(rv.error)+'</p>':'')+(rv.done?'<div class="btns"><button class="btn sm" data-act="use-draft">放进本周观察</button><button class="btn ghost sm" data-act="drop-draft">丢弃</button></div>':(rv.loading?'<div class="btns"><button class="btn ghost sm" data-act="stop-draft">停止</button></div>':''))+'</div>' : '')+
+    '</div></div></div></div>';
+}
+
+/* ---------- view: export & settings ---------- */
+const MCP_PROMPT = "请用 agent-hub 连接器（list_tasks 带 include_closed、get_task、list_rules）读取我的 Agent 工作台，然后通过 Obsidian MCP 把内容写进我的 vault 的「Agent工作台」文件夹：每个任务一篇笔记放在「任务/」，文件名用任务编号，属性用 YAML frontmatter（id、title、project、agent、risk、status、created、done、cost、minutes、rework、first_pass、reasons、pr、session）；规则放在「规则/」；每周复盘放在「复盘/」，用 [[任务编号]] 链接相关任务。已存在的笔记只更新 frontmatter 和「工作台同步」段落，不要覆盖我手写的内容。";
+function viewExport(){
+  const samples = S.tasks.filter(t=>t.sample).length;
+  return '<div class="grid2"><div class="stack">'+
+    '<div class="panel"><h2>导出到 Obsidian</h2><p class="hint">生成一个 zip：每个任务、规则、复盘各一篇 Markdown 笔记（YAML 属性），外加两个 Bases 看板文件，解压到 vault 根目录即可使用。</p>'+
+      '<div class="form"><label class="small"><input type="checkbox" id="x-all" checked> 包含已结束超过 30 天的任务</label>'+
+      '<div class="btns">'+(S.cap.downloads?'<button class="btn pri" data-act="export-obsidian">下载 Obsidian 包（.zip）</button>':'<span class="small muted">当前环境不支持下载文件，请用下面的 MCP 方式同步。</span>')+'</div></div>'+
+      '<details class="more" style="margin-top:12px"><summary>包内结构</summary><pre class="code" style="margin-top:8px">Agent工作台/\n├─ 任务/T260922-a1b.md      每个任务一篇，属性可被 Bases 查询\n├─ 规则/R-xxxx.md           规则库\n├─ 复盘/2026-W39.md         周复盘，[[链接]]到任务\n├─ 任务看板.base            需要处理 / 按状态 / 按 Agent\n├─ 规则库.base\n├─ AGENTS-规则片段.md       可直接粘进规则文件\n└─ README.md</pre></details></div>'+
+    '<div class="panel"><h2>用 Claude + Obsidian MCP 同步</h2><p class="hint">在同时连接了 agent-hub 和 Obsidian MCP 的 Claude 会话里发送下面这段话（agent-hub 的接入方式见“接入”页），Claude 会读取本工作台的数据并写进你的 vault，适合定期增量同步。</p><pre class="code" style="white-space:pre-wrap">'+esc(MCP_PROMPT)+'</pre><div class="btns" style="margin-top:10px"><button class="btn sm" data-act="copy" data-what="mcp-prompt">复制指令</button></div></div>'+
+    '<div class="panel"><h2>备份与恢复</h2><p class="hint">JSON 备份包含全部任务、规则、复盘和设置，格式与原 Artifact 版工作台相同，可以互相导入。</p><div class="btns">'+(S.cap.downloads?'<button class="btn" data-act="export-json">下载 JSON 备份</button>':'')+'<label class="btn" for="imp-file">从 JSON 恢复</label><input type="file" id="imp-file" accept=".json,application/json" hidden></div>'+
+      (samples?'<div class="btns" style="margin-top:12px"><button class="btn bad sm" data-act="clear-samples">清除 '+samples+' 个示例任务</button></div>':'')+'</div>'+
+  '</div><div class="stack">'+
+    '<div class="panel"><h2>Agent 列表</h2><div class="chips" style="margin-bottom:10px">'+S.config.agents.map((a,i)=>'<span class="chip">'+esc(a)+' <button class="btn ghost sm" style="padding:0 4px" data-act="rm-agent" data-i="'+i+'" aria-label="移除 '+esc(a)+'">×</button></span>').join("")+'</div>'+
+      '<div class="btns"><input type="text" id="cfg-agent" placeholder="新增 Agent 名称" style="max-width:220px"><button class="btn sm" data-act="add-agent">添加</button></div></div>'+
+    '<div class="panel"><h2>项目</h2><p class="hint" style="margin:0">项目档案、接入清单和接入包在“项目”页管理。</p><div class="btns" style="margin-top:8px"><button class="btn sm" data-act="tab" data-k="projects">去项目页</button></div></div>'+
+    '<div class="panel"><details class="more" style="border:0;padding:0"><summary>数据结构与 API</summary><p class="hint" style="margin-top:8px">接入 agent-hub MCP 的任何 Agent 或 Claude 会话都可以直接更新这个工作台，例如“把 T260922-a1b 退回，原因是验证不足”。REST：/api/docs/&lt;集合&gt;/&lt;编号&gt;（GET/PUT/PATCH/DELETE，Bearer 令牌）。集合与字段：</p><pre class="code">'+esc(SCHEMA_DOC)+'</pre></details></div>'+
+  '</div></div>';
+}
+const SCHEMA_DOC = [
+"tasks/<id>   id 形如 T260922-a1b",
+"  title, project, agent, risk(L1–L4)",
+"  status: 待规格|待执行|执行中|需介入|待评审|已合并|已放弃",
+"  goal, acceptance:[{text,done}], allow, deny, budgetMin",
+"  spec, branch, pr, session",
+"  cost(元), minutes, ciRounds, lines",
+"  receipt:{summary, changed[], verify[{cmd,result}], scope, risks, at}",
+"  reworks:[{at, reasons[], note}]   每次退回一条",
+"  usage:{sessions, costUsd, tokensIn, tokensOut, toolCalls, edits, denies, agents[]}   由钩子和 OTel 自动汇总",
+"  lastCheck:{at, ok, verify[], outOfScope[], changed[], added, removed}   task.sh check / 结束前验证回传",
+"  review:{at, firstPass, reasons[], note}   合并时",
+"  dropReason, history:[{at,from,to}]",
+"  createdAt, updatedAt, startedAt, doneAt (ISO 时间), sample(示例)",
+"rules/<id>   text, target, scope(全局|项目名), status(待写入|已写入|已废弃),",
+"             sourceTask, hits, createdAt, writtenAt",
+"retros/<YYYY-Www>   notes, actions, updatedAt",
+"config/main  agents[], projects[{name, path, stage, stack, docs, verify[], invariants[], forbidden[], protect[], onboard{git,kit,hooks,verify,first}}]",
+"原因分类：" + REASONS.join("、")].join("\n");
+/* ---------- drawer: task detail ---------- */
+function fld(id, f, label, val, type, ph){
+  return '<label class="f"><span>'+label+'</span><input type="'+(type||"text")+'" id="'+id+'" data-f="'+f+'" value="'+esc(val==null?"":val)+'"'+(ph?' placeholder="'+esc(ph)+'"':'')+(type==="number"?' step="any" min="0"':'')+'></label>';
+}
+function linkOut(v){ const u = safeUrl(v); return u ? ' <a href="'+esc(u)+'" target="_blank" rel="noopener noreferrer" class="small">打开</a>' : ""; }
+function reviewPanel(t){
+  const mode = S.reviewMode; const sel = S.reviewSel || [];
+  const chips = '<div class="chips">'+REASONS.map(r=>'<button class="chip" data-act="rv-chip" data-r="'+esc(r)+'" aria-pressed="'+sel.includes(r)+'">'+esc(r)+'</button>').join("")+'</div>';
+  const ruleBox = '<label class="small"><input type="checkbox" id="rv-rule"> 把备注沉淀为一条规则</label><label class="f"><span>规则写入位置</span><select id="rv-target">'+TARGETS.map(x=>opt(x,"AGENTS.md")).join("")+'</select></label>';
+  if (mode==="merge"){
+    const clean = !(t.reworks||[]).length;
+    return '<div class="review"><strong>评审通过并合并</strong>'+
+      '<div class="small">'+(clean?'这次没有退回记录，将计为<b>一次通过</b>。':'此前退回过 '+(t.reworks||[]).length+' 次，不计为一次通过。')+'</div>'+
+      '<div class="f"><span class="small">合并时仍发现的问题（可不选）</span>'+chips+'</div>'+
+      '<label class="f"><span>评审备注</span><textarea id="rv-note" placeholder="值得记住的做法或问题"></textarea></label>'+ruleBox+
+      '<div class="btns"><button class="btn pri" data-act="rv-confirm">确认合并</button><button class="btn ghost" data-act="rv-cancel">取消</button></div></div>';
+  }
+  if (mode==="rework"){
+    return '<div class="review"><strong>退回修改</strong><div class="f"><span class="small">退回原因（至少选一项）</span>'+chips+'</div>'+
+      '<label class="f"><span>具体说明</span><textarea id="rv-note" placeholder="哪里不对，希望怎么改"></textarea></label>'+ruleBox+
+      '<div class="btns"><button class="btn pri" data-act="rv-confirm">确认退回</button><button class="btn ghost" data-act="rv-cancel">取消</button></div></div>';
+  }
+  if (mode==="drop"){
+    return '<div class="review"><strong>放弃任务</strong><label class="f"><span>主要原因</span><select id="rv-drop">'+REASONS.concat(["需求取消","改为人工完成"]).map(r=>opt(r,"")).join("")+'</select></label>'+
+      '<label class="f"><span>说明</span><textarea id="rv-note"></textarea></label>'+
+      '<div class="btns"><button class="btn bad" data-act="rv-confirm">确认放弃</button><button class="btn ghost" data-act="rv-cancel">取消</button></div></div>';
+  }
+  return "";
+}
+function drawerHtml(t){
+  const nexts = (NEXT[t.status]||[]).map(([to,l]) => '<button class="btn sm'+(to==="__merge"||to==="待评审"||to==="执行中"&&t.status!=="需介入"||to==="待执行"?" pri":"")+'" data-act="move" data-to="'+esc(to)+'">'+esc(l)+'</button>').join("");
+  const rc = t.receipt;
+  const acc = t.acceptance || [];
+  const wait = t.status==="待评审" ? dur(Date.now()-new Date(lastEntered(t,"待评审")||t.updatedAt)) : "—";
+  return '<div class="backdrop" data-act="close"></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="任务详情">'+
+  '<div class="dh"><div class="top"><span class="mono small muted">'+esc(t.id)+' '+sampleBadge(t)+'</span><button class="btn ghost" data-act="close" aria-label="关闭">关闭</button></div>'+
+    '<input type="text" class="title" id="d-title" data-f="title" value="'+esc(t.title||"")+'" aria-label="标题">'+
+    '<div class="btns">'+stPill(t.status)+rkPill(t.risk)+nexts+'</div></div>'+
+  '<div class="db" data-keep-scroll="drawer">'+
+    (S.reviewMode ? reviewPanel(t) : "")+
+    '<div class="sec"><div class="row c3">'+
+      '<label class="f"><span>项目</span><select id="d-project" data-f="project">'+projectOptions(t.project||"")+'</select></label>'+
+      '<label class="f"><span>Agent</span><select id="d-agent" data-f="agent">'+agentOptions(t.agent||"")+'</select></label>'+
+      '<label class="f"><span>风险等级</span><select id="d-risk" data-f="risk">'+RISKS.map(r=>opt(r,t.risk)).join("")+'</select></label></div>'+
+      '<div class="meta" style="margin-top:10px"><div><span>创建</span>'+fmtDate(t.createdAt)+'</div><div><span>开始执行</span>'+fmtDate(t.startedAt)+'</div><div><span>结束</span>'+fmtDate(t.doneAt)+'</div><div><span>评审等待</span>'+wait+'</div></div></div>'+
+    '<div class="sec"><h4>目标</h4><textarea id="d-goal" data-f="goal">'+esc(t.goal||"")+'</textarea></div>'+
+    '<div class="sec"><h4>验收标准 <span class="muted small">'+acc.filter(a=>a.done).length+'/'+acc.length+'</span></h4><ul class="checks">'+acc.map((a,i)=>'<li><input type="checkbox" id="d-acc-'+i+'" data-act="acc-toggle" data-i="'+i+'"'+(a.done?" checked":"")+'><label for="d-acc-'+i+'">'+esc(a.text)+'</label></li>').join("")+'</ul>'+
+      '<div class="btns" style="margin-top:8px"><input type="text" id="d-acc-new" placeholder="新增一条验收标准" style="flex:1;min-width:160px"><button class="btn sm" data-act="acc-add">添加</button></div></div>'+
+    '<div class="sec"><h4>范围与预算</h4><div class="row c3">'+fld("d-allow","allow","允许修改",t.allow)+fld("d-deny","deny","禁止修改",t.deny)+fld("d-budget","budgetMin","时长预算（分）",t.budgetMin,"number")+'</div></div>'+
+    '<div class="sec"><h4>链接</h4><div class="row c2">'+
+      '<label class="f"><span>规格'+linkOut(t.spec)+'</span><input type="text" id="d-spec" data-f="spec" value="'+esc(t.spec||"")+'"></label>'+
+      '<label class="f"><span>分支</span><input type="text" id="d-branch" data-f="branch" value="'+esc(t.branch||"")+'"></label>'+
+      '<label class="f"><span>PR'+linkOut(t.pr)+'</span><input type="text" id="d-pr" data-f="pr" value="'+esc(t.pr||"")+'" placeholder="https://"></label>'+
+      '<label class="f"><span>会话记录'+linkOut(t.session)+'</span><input type="text" id="d-session" data-f="session" value="'+esc(t.session||"")+'"></label></div></div>'+
+    '<div class="sec"><h4>用量'+(t.usage?' <span class="muted small">自动汇总：'+t.usage.sessions+' 个会话 · $'+(t.usage.costUsd||0).toFixed(2)+' · '+fmtTok((t.usage.tokensIn||0)+(t.usage.tokensOut||0))+' token · 修改 '+(t.usage.edits||0)+' 次'+(t.usage.denies?' · 拦截 '+t.usage.denies+' 次':'')+(t.costManual?' · 成本为手填':'')+'</span>':'')+'</h4><div class="row c4">'+fld("d-cost","cost","成本（元）",t.cost,"number")+fld("d-minutes","minutes","耗时（分）",t.minutes,"number")+fld("d-ci","ciRounds","CI 轮次",t.ciRounds,"number")+fld("d-lines","lines","改动行数",t.lines,"number")+'</div></div>'+
+    '<div class="sec"><h4>交付回执'+(rc&&rc.at?' <span class="muted small">'+esc(fmtDate(rc.at))+'</span>':'')+'</h4>'+
+      (rc ? '<p style="margin:0 0 8px">'+esc(rc.summary||"（无摘要）")+'</p>'+
+        ((rc.verify||[]).length?'<ul class="vlist">'+rc.verify.map(v=>'<li><span class="'+(v.result==="pass"?"ok":v.result==="fail"?"bad":"muted")+'">'+(v.result==="pass"?"通过":v.result==="fail"?"失败":"未知")+'</span><code class="mono small">'+esc(v.cmd)+'</code></li>').join("")+'</ul>':'')+
+        ((rc.changed||[]).length?'<details class="more" style="margin-top:8px;border:0;padding:0"><summary class="small">改动文件 '+rc.changed.length+' 个</summary><pre class="code" style="margin-top:6px">'+esc(rc.changed.join("\n"))+'</pre></details>':'')+
+        (!scopeOk(rc.scope)?'<p class="small bad" style="margin:8px 0 0">范围声明：'+esc(rc.scope)+'</p>':'')+
+        (rc.risks&&!/^(无|none)$/i.test(rc.risks)?'<p class="small" style="margin:6px 0 0">风险：'+esc(rc.risks)+'</p>':'')
+       : '<p class="hint">还没有回执。</p>')+
+      '<details class="more" style="margin-top:10px"><summary class="small">粘贴新回执</summary><div class="form" style="margin-top:8px"><textarea id="d-receipt" class="code" placeholder="```agent-receipt …```"></textarea><div class="btns"><button class="btn sm" data-act="d-receipt">解析并写入</button></div></div></details></div>'+
+    activityHtml(t)+
+    '<div class="sec"><h4>评审记录</h4>'+
+      ((t.reworks||[]).length||t.review ? '<ul class="vlist">'+(t.reworks||[]).map((r,i)=>'<li><span class="pill st-待评审">第 '+(i+1)+' 次退回</span><span>'+esc((r.reasons||[]).join("、"))+(r.note?"：":"")+esc(r.note||"")+' <span class="muted mono small">'+esc(fmtDate(r.at))+'</span></span></li>').join("")+
+        (t.review?'<li><span class="pill st-已合并">合并</span><span>'+(t.review.firstPass?"一次通过":"经过退回")+((t.review.reasons||[]).length?"；问题："+esc(t.review.reasons.join("、")):"")+(t.review.note?"；"+esc(t.review.note):"")+'</span></li>':'')+'</ul>' : '<p class="hint">暂无。</p>')+
+      (t.dropReason?'<p class="small">放弃原因：'+esc(t.dropReason)+'</p>':'')+'</div>'+
+    '<div class="sec"><h4>状态历史</h4><ul class="hist">'+(t.history||[]).slice().reverse().map(h=>'<li>'+esc(fmtDate(h.at))+'  '+esc(h.from||"—")+' → '+esc(h.to)+'</li>').join("")+'<li>'+esc(fmtDate(t.createdAt))+'  创建</li></ul></div>'+
+    '<div class="sec"><div class="btns"><button class="btn" data-act="copy" data-what="brief">复制任务单</button><button class="btn" data-act="copy" data-what="task-md">复制为 Obsidian 笔记</button><button class="btn ghost bad" data-act="del-task">删除任务</button></div></div>'+
+  '</div></aside>';
+}
+/* ---------- Obsidian export ---------- */
+const y = v => v==null || v==="" ? "" : (typeof v==="number" || typeof v==="boolean") ? String(v) : JSON.stringify(String(v));
+function localDt(iso){ if(!iso) return ""; const d=new Date(iso); if(isNaN(d)) return ""; const p=x=>String(x).padStart(2,"0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"T"+p(d.getHours())+":"+p(d.getMinutes()); }
+function taskToMd(t){
+  const reasons = [...new Set((t.reworks||[]).flatMap(r=>r.reasons||[]).concat((t.review&&t.review.reasons)||[]).concat(t.dropReason?[t.dropReason]:[]))];
+  const fm = [
+    "id: "+y(t.id), "title: "+y(t.title), "aliases: "+JSON.stringify([t.title||t.id]),
+    "project: "+y(t.project), "agent: "+y(t.agent), "risk: "+y(t.risk), "status: "+y(t.status),
+    "created: "+localDt(t.createdAt), "started: "+localDt(t.startedAt), "done: "+localDt(t.doneAt),
+    "cost: "+(num(t.cost)??""), "minutes: "+(num(t.minutes)??""), "ci_rounds: "+(num(t.ciRounds)??""), "lines: "+(num(t.lines)??""),
+    "rework: "+(t.reworks||[]).length, "first_pass: "+(t.status==="已合并" ? String(!(t.reworks||[]).length) : ""),
+    "reasons: "+JSON.stringify(reasons), "branch: "+y(t.branch), "pr: "+y(t.pr), "session: "+y(t.session), "spec: "+y(t.spec),
+    "tags: [agent-task]"
+  ];
+  const L = ["---"].concat(fm, ["---", "# "+(t.title||t.id), "",
+    "> [!info] 工作台同步", "> 本笔记由 Agent 工作台导出，重新导出会覆盖。自己的想法请写在单独的笔记里，并链接 [["+t.id+"]]。", "",
+    "## 目标", t.goal||"—", "", "## 验收标准"]);
+  (t.acceptance||[]).length ? t.acceptance.forEach(a=>L.push("- ["+(a.done?"x":" ")+"] "+a.text)) : L.push("—");
+  L.push("", "## 范围与预算", "- 允许修改："+(t.allow||"—"), "- 禁止修改："+(t.deny||"—"), "- 时长预算："+(t.budgetMin?t.budgetMin+" 分钟":"—"));
+  const rc = t.receipt;
+  L.push("", "## 交付回执");
+  if (rc){ L.push(rc.summary||"—"); (rc.verify||[]).forEach(v=>L.push("- "+(v.result==="pass"?"通过":v.result==="fail"?"失败":"未知")+"：`"+v.cmd+"`"));
+    if ((rc.changed||[]).length){ L.push("", "改动文件：", "```", ...rc.changed, "```"); }
+    L.push("", "- 范围："+(rc.scope||"—"), "- 风险："+(rc.risks||"—")); } else L.push("—");
+  L.push("", "## 评审记录");
+  (t.reworks||[]).forEach((r,i)=>L.push("- 第 "+(i+1)+" 次退回（"+localDt(r.at)+"）："+(r.reasons||[]).join("、")+(r.note?" — "+r.note:"")));
+  if (t.review) L.push("- 合并（"+localDt(t.review.at)+"）："+(t.review.firstPass?"一次通过":"经过退回")+((t.review.reasons||[]).length?"；问题："+t.review.reasons.join("、"):"")+(t.review.note?" — "+t.review.note:""));
+  if (t.dropReason) L.push("- 放弃："+t.dropReason+(t.dropNote?" — "+t.dropNote:""));
+  if (!(t.reworks||[]).length && !t.review && !t.dropReason) L.push("—");
+  L.push("", "## 状态历史"); (t.history||[]).forEach(h=>L.push("- "+localDt(h.at)+" "+(h.from||"—")+" → "+h.to)); L.push("- "+localDt(t.createdAt)+" 创建");
+  return L.join("\n")+"\n";
+}
+function ruleToMd(r){
+  return ["---","id: "+y(r.id),"target: "+y(r.target),"scope: "+y(r.scope||"全局"),"status: "+y(r.status),"hits: "+(r.hits||1),"created: "+localDt(r.createdAt),"written: "+localDt(r.writtenAt),"source: "+(r.sourceTask?JSON.stringify("[["+r.sourceTask+"]]"):""),"tags: [agent-rule]","---","",r.text||"",""].join("\n");
+}
+function retroToMd(r){
+  const [yy, ww] = String(r.id).split("-W"); let s = null;
+  try { const jan4 = new Date(Number(yy),0,4); const d0 = (jan4.getDay()+6)%7; s = new Date(Number(yy),0,4-d0+(Number(ww)-1)*7); } catch(e){}
+  const L = ["---","week: "+y(r.id),"updated: "+localDt(r.updatedAt),"tags: [agent-retro]","---","# 复盘 "+r.id,""];
+  if (s && !isNaN(s)){ const e = new Date(s); e.setDate(s.getDate()+7); const m = metrics(S.tasks, s, e);
+    L.push("| 新建 | 合并 | 放弃 | 合并率 | 一次通过率 | 总成本 |","|---|---|---|---|---|---|","| "+[m.created.length,m.merged.length,m.dropped.length,pct(m.merged.length,m.finished.length),pct(m.firstPass.length,m.merged.length),money(m.cost)].join(" | ")+" |","");
+    if (m.reasons.length) L.push("问题归因："+m.reasons.map(([k,n])=>k+" "+n).join("，"),"");
+    const rel = S.tasks.filter(t=>inRange(t.doneAt,s,e)||(t.reworks||[]).some(x=>inRange(x.at,s,e)));
+    if (rel.length){ L.push("## 相关任务"); rel.forEach(t=>L.push("- [["+t.id+"|"+(t.title||t.id)+"]] · "+t.status+" · "+(t.agent||""))); L.push(""); } }
+  L.push("## 本周观察", r.notes||"—", "", "## 下周行动", r.actions||"—", "");
+  return L.join("\n");
+}
+const TASK_BASE = [
+"filters:","  and:","    - file.inFolder(\"Agent工作台/任务\")",
+"properties:","  title:","    displayName: 标题","  status:","    displayName: 状态","  agent:","    displayName: Agent","  project:","    displayName: 项目","  risk:","    displayName: 风险","  cost:","    displayName: 成本","  minutes:","    displayName: 耗时","  rework:","    displayName: 退回次数",
+"views:",
+"  - type: table","    name: 需要处理","    filters:","      or:","        - 'status == \"需介入\"'","        - 'status == \"待评审\"'","    order:","      - file.name","      - title","      - status","      - agent","      - project","      - risk",
+"  - type: table","    name: 按状态","    groupBy:","      property: status","      direction: ASC","    order:","      - file.name","      - title","      - agent","      - project","      - risk","      - cost","      - rework",
+"  - type: table","    name: 按 Agent","    groupBy:","      property: agent","      direction: ASC","    order:","      - file.name","      - title","      - status","      - cost","      - minutes","      - rework","    summaries:","      cost: Sum","      minutes: Average","      rework: Sum",
+"  - type: cards","    name: 卡片","    order:","      - title","      - status","      - agent","      - project",""].join("\n");
+const RULE_BASE = [
+"filters:","  and:","    - file.inFolder(\"Agent工作台/规则\")",
+"views:",
+"  - type: table","    name: 待写入","    filters:","      and:","        - 'status == \"待写入\"'","    order:","      - file.name","      - target","      - scope","      - hits","      - source",
+"  - type: table","    name: 按写入位置","    groupBy:","      property: target","      direction: ASC","    order:","      - file.name","      - status","      - scope","      - hits",""].join("\n");
+function readmeMd(){ return ["# Agent 工作台导出","","导出时间："+new Date().toLocaleString("zh-CN"),"","## 使用方式","1. 把整个「Agent工作台」文件夹放到 vault 根目录（Bases 的筛选条件按这个路径写；放到别处时，打开 .base 文件修改 `file.inFolder` 的路径）。","2. 打开「任务看板.base」查看：需要处理 / 按状态 / 按 Agent / 卡片。需要看板列视图时，可以安装社区插件 Kanban for Bases，按 status 分列。","3. 「AGENTS-规则片段.md」可以直接粘进项目的 AGENTS.md、CLAUDE.md 或 .cursor/rules。","","## 约定","- 任务、规则、复盘笔记是工作台的快照，重新导出会覆盖同名文件。","- 自己的想法写在单独的笔记里，用 [[任务编号]] 链接，不会被覆盖。","- 也可以在接入 Obsidian MCP 的 Claude 会话里做增量同步（见工作台的「导出与设置」）。",""].join("\n"); }
+async function buildExport(includeAll){
+  const cutoff = Date.now()-30*86400000;
+  const tasks = S.tasks.filter(t => includeAll || OPEN.includes(t.status) || new Date(t.doneAt||t.updatedAt||t.createdAt).getTime()>=cutoff);
+  if (!window.JSZip){
+    const parts = tasks.map(taskToMd).concat(S.rules.map(ruleToMd), Object.values(S.retros).map(retroToMd));
+    return {filename:"Agent工作台-合并导出.md", data: parts.join("\n\n---\n\n")};
+  }
+  const zip = new JSZip(); const root = zip.folder("Agent工作台");
+  tasks.forEach(t=>root.file("任务/"+fileSafe(t.id)+".md", taskToMd(t)));
+  S.rules.forEach(r=>root.file("规则/"+fileSafe(r.id)+".md", ruleToMd(r)));
+  Object.values(S.retros).forEach(r=>root.file("复盘/"+fileSafe(r.id)+".md", retroToMd(r)));
+  root.file("任务看板.base", TASK_BASE); root.file("规则库.base", RULE_BASE);
+  root.file("AGENTS-规则片段.md", rulesSnippet()+"\n"); root.file("README.md", readmeMd());
+  const d = new Date(); const stamp = d.getFullYear()+String(d.getMonth()+1).padStart(2,"0")+String(d.getDate()).padStart(2,"0");
+  return {filename:"Agent工作台-"+stamp+".zip", data: await zip.generateAsync({type:"blob"})};
+}
+async function saveFile(filename, data){
+  if (!S.cap.downloads){ toast("当前环境不支持下载文件"); return; }
+  try { await S.cap.downloads.save({filename, data}); toast("已导出 "+filename); }
+  catch(e){ const c = e && e.code; if (c==="declined") return; toast(c==="rate_limited" ? "已有一个保存确认在等待，请先处理" : c==="rejected_extension"||c==="extension_not_enabled" ? "当前环境不支持这种文件格式" : "导出失败，请重试"); }
+}
+
+/* ---------- copy & modal ---------- */
+let modalEl = null;
+function closeModal(){ if (modalEl){ modalEl.remove(); modalEl = null; } }
+function showText(title, text, filename){
+  closeModal(); modalEl = document.createElement("div"); modalEl.className = "modal";
+  modalEl.innerHTML = '<div class="box" role="dialog" aria-modal="true" aria-label="'+esc(title)+'"><header>'+esc(title)+'</header><div><textarea id="modal-text" class="code" readonly>'+esc(text)+'</textarea></div><footer class="btns"><button class="btn pri" data-act="modal-copy">复制</button>'+(filename&&S.cap.downloads?'<button class="btn" data-act="modal-save" data-fn="'+esc(filename)+'">下载 .md</button>':'')+'<button class="btn ghost" data-act="modal-close">关闭</button></footer></div>';
+  document.body.appendChild(modalEl);
+  modalEl.addEventListener("click", e => { if (e.target === modalEl) closeModal(); });
+  const ta = $("#modal-text", modalEl); ta.focus(); ta.select();
+}
+async function copyText(text, label){
+  try { await navigator.clipboard.writeText(text); toast((label||"内容")+"已复制"); }
+  catch(e){ showText(label||"复制内容", text); toast("已选中，请手动复制"); }
+}
+function armed(el, fn, msg){
+  if (el.dataset.armed){ delete el.dataset.armed; fn(); return; }
+  const old = el.textContent; el.dataset.armed = "1"; el.textContent = msg || "再点一次确认";
+  setTimeout(()=>{ if (el.isConnected && el.dataset.armed){ delete el.dataset.armed; el.textContent = old; } }, 3000);
+}
+/* ---------- Claude-assisted helpers ---------- */
+function sampleErr(e){ const c = e && e.code;
+  if (c==="not_granted"||c==="sampling_disabled"||c==="not_declared"||c==="capability_disabled"||c==="capability_removed"){ S.cap.sample = null; return "模型辅助未配置（在 hub 的 .env 里设置 LLM_*）"; }
+  if (c==="rate_limited") return "请求太频繁或额度已用完，请稍后再试";
+  if (c==="invalid_json") return "Claude 的回复格式不对，可以再试一次";
+  if (c==="prompt_too_large") return "数据太多了，请缩小范围";
+  if (c==="cancelled") return "";
+  return "模型暂时没有响应，请稍后再试"; }
+function normReceipt(o){
+  if (!o || typeof o !== "object") return null;
+  const arr = v => Array.isArray(v) ? v.map(String).filter(Boolean) : (v ? String(v).split(/[,，\n]\s*/).filter(Boolean) : []);
+  return { task: o.task ? String(o.task) : "", status: /block/i.test(String(o.status||"")) ? "blocked" : "done", summary: String(o.summary||""), changed: arr(o.changed),
+    verify: Array.isArray(o.verify) ? o.verify.map(v=>({cmd:String(v&&v.cmd||v||""), result:["pass","fail"].includes(v&&v.result)?v.result:"unknown"})).filter(v=>v.cmd) : [],
+    scope: String(o.scope||""), risks: String(o.risks||""), session: o.session ? String(o.session) : "", cost: num(o.cost), minutes: num(o.minutes), ciRounds: num(o.ci_rounds), lines: num(o.lines) };
+}
+async function aiReceipt(text){
+  const prompt = "从下面这段编码 Agent 的交付说明中提取字段。只输出一个 JSON 对象，格式：\n"+
+    '{"task": 任务编号或null, "status": "done" 或 "blocked", "summary": 一句话中文摘要, "changed": [文件路径], "verify": [{"cmd": 命令, "result": "pass"|"fail"|"unknown"}], "scope": "ok" 或 超出范围的说明, "risks": 风险或"无", "session": 会话链接或null, "cost": 数字或null, "minutes": 数字或null, "ci_rounds": 数字或null}\n'+
+    "没有提到的字段填 null，不要编造。\n\n交付说明：\n"+String(text).slice(0,12000);
+  return normReceipt(await S.cap.sample.json(prompt, {modelTier:"quick"}));
+}
+function recentProblems(days){
+  const since = Date.now()-days*86400000; const out = [];
+  S.tasks.forEach(t=>{
+    (t.reworks||[]).forEach(r=>{ if(new Date(r.at).getTime()>=since) out.push({task:t.title, project:t.project||"", agent:t.agent||"", kind:"退回", reasons:r.reasons||[], note:r.note||""}); });
+    if (t.review && new Date(t.review.at).getTime()>=since && ((t.review.reasons||[]).length||t.review.note)) out.push({task:t.title, project:t.project||"", agent:t.agent||"", kind:"合并时问题", reasons:t.review.reasons||[], note:t.review.note||""});
+    if (t.status==="已放弃" && t.doneAt && new Date(t.doneAt).getTime()>=since) out.push({task:t.title, project:t.project||"", agent:t.agent||"", kind:"放弃", reasons:t.dropReason?[t.dropReason]:[], note:t.dropNote||""});
+  });
+  return out.slice(0,80);
+}
+async function suggestRules(){
+  const probs = recentProblems(30);
+  if (!probs.length){ S.ruleSuggest = {items: []}; render(); return; }
+  S.ruleSuggest = {loading:true}; render();
+  const prompt = "你在帮一位研发负责人把编码 Agent 反复出现的问题沉淀成规则。下面是近 30 天的退回/问题记录（JSON）和已有规则。\n"+
+    "找出反复出现或代价高的问题，给出最多 5 条新规则建议，不要和已有规则重复。每条规则要具体、可执行、能写进规则文件。\n"+
+    '只输出 JSON 数组：[{"text": 规则内容, "target": 从 '+JSON.stringify(TARGETS)+' 中选一个, "scope": "全局" 或具体项目名, "why": 一句话依据}]\n\n'+
+    "问题记录：\n"+JSON.stringify(probs)+"\n\n已有规则：\n"+JSON.stringify(S.rules.filter(r=>r.status!=="已废弃").map(r=>r.text).slice(0,60));
+  try {
+    const arr = await S.cap.sample.json(prompt);
+    const items = (Array.isArray(arr)?arr:[]).filter(x=>x&&x.text).slice(0,5).map(x=>({text:String(x.text), target:TARGETS.includes(x.target)?x.target:"AGENTS.md", scope:String(x.scope||"全局"), why:String(x.why||"")}));
+    S.ruleSuggest = {items};
+  } catch(e){ S.ruleSuggest = {error: sampleErr(e) || "已取消"}; }
+  render();
+}
+let draftCtl = null;
+async function draftRetro(){
+  const w = weekRange(S.weekOffset); const m = metrics(S.tasks, w.start, w.end);
+  const rel = S.tasks.filter(t=>inRange(t.doneAt,w.start,w.end)||(t.reworks||[]).some(x=>inRange(x.at,w.start,w.end))||inRange(t.createdAt,w.start,w.end)).slice(0,50)
+    .map(t=>({title:t.title, agent:t.agent, project:t.project, risk:t.risk, status:t.status, reworks:(t.reworks||[]).map(r=>({reasons:r.reasons,note:r.note})), review:t.review?{firstPass:t.review.firstPass,note:t.review.note}:null, drop:t.dropReason||null, cost:t.cost, minutes:t.minutes}));
+  const data = {week:w.key, created:m.created.length, merged:m.merged.length, dropped:m.dropped.length, mergeRate:pct(m.merged.length,m.finished.length), firstPassRate:pct(m.firstPass.length,m.merged.length), totalCost:m.cost, reasons:m.reasons, tasks:rel, newRules:S.rules.filter(r=>inRange(r.createdAt,w.start,w.end)).map(r=>r.text)};
+  const prompt = "你在帮一位同时使用多个编码 Agent 的研发负责人写每周复盘。根据下面的数据，用中文写一份简洁的复盘（不超过 350 字），分四段并用小标题：本周概况、主要问题与归因、哪些任务适合或不适合交给 Agent、下周建议。只基于数据，不要编造。数据中没有的内容不要写。\n\n数据：\n"+JSON.stringify(data);
+  draftCtl = new AbortController();
+  S.retroDraft = {loading:true, text:""}; render();
+  try {
+    const r = await S.cap.sample(prompt, {signal: draftCtl.signal, onText: ({text}) => { S.retroDraft.text = text; const el = $("#rt-stream"); if (el) el.textContent = text; }});
+    S.retroDraft = {text: r.text, done: true};
+  } catch(e){ const msg = sampleErr(e); S.retroDraft = e && e.text ? {text:e.text, done:true, error: msg} : (msg ? {text:"", error:msg} : null); }
+  draftCtl = null; render();
+}
+
+/* ---------- actions ---------- */
+function val(id){ const el = document.getElementById(id); return el ? el.value : ""; }
+function checked(id){ const el = document.getElementById(id); return !!(el && el.checked); }
+function addRule(text, target, scope, sourceTask){
+  const id = "R-"+rid(5);
+  return store.set("rules", id, {text: String(text).trim().slice(0,1000), target: target||"AGENTS.md", scope: scope||"全局", status:"待写入", hits:1, sourceTask: sourceTask||"", createdAt: nowIso()});
+}
+function newTaskDoc(o){
+  const at = nowIso(); const st = o.status || "待执行";
+  return Object.assign({title:"", project:"", agent:"", risk:"L2", goal:"", acceptance:[], allow:"", deny:"", budgetMin:60, spec:"", branch:"", pr:"", session:"",
+    cost:null, minutes:null, ciRounds:null, lines:null, reworks:[], history:[{at, from:"", to:st}], createdAt:at, updatedAt:at, startedAt: st==="执行中"?at:null, doneAt:null}, o, {status: st});
+}
+const A = {
+  tab(el){ S.tab = el.dataset.k; S.openId = null; S.reviewMode = null; try{ localStorage.setItem("awb.tab", S.tab); }catch(e){} if (S.tab==="agents") refreshStatus(); render(); window.scrollTo(0,0); },
+  open(el){ S.openId = el.dataset.id; S.reviewMode = null; S.reviewSel = []; loadActivity(S.openId); render(); },
+  logout(){ fetch("/api/logout", {method:"POST"}).finally(()=>location.reload()); },
+  "refresh-status"(){ refreshStatus(); toast("已刷新"); },
+  "copy-el"(el){ const t = document.getElementById(el.dataset.target); if (t) copyText(t.textContent, "内容"); },
+  close(){ S.openId = null; S.reviewMode = null; render(); },
+  move(el){
+    const t = getTask(S.openId); if (!t) return; const to = el.dataset.to;
+    if (to==="__merge"){ S.reviewMode="merge"; S.reviewSel=[]; render(); return; }
+    if (to==="__rework"){ S.reviewMode="rework"; S.reviewSel=[]; render(); return; }
+    if (to==="已放弃"){ S.reviewMode="drop"; render(); return; }
+    moveTask(t, to).then(()=>toast("已移到「"+to+"」"));
+  },
+  "rv-chip"(el){ const r = el.dataset.r; S.reviewSel = S.reviewSel||[]; S.reviewSel = S.reviewSel.includes(r) ? S.reviewSel.filter(x=>x!==r) : S.reviewSel.concat([r]); render(); },
+  "rv-cancel"(){ S.reviewMode = null; render(); },
+  async "rv-confirm"(){
+    const t = getTask(S.openId); if (!t) return; const at = nowIso(); const note = val("rv-note").trim(); const sel = (S.reviewSel||[]).slice(); const mode = S.reviewMode;
+    const wantRule = checked("rv-rule") && note; const target = val("rv-target");
+    if (mode==="rework" && !sel.length){ toast("请至少选一个退回原因"); return; }
+    S.reviewMode = null;
+    if (mode==="merge") await moveTask(t, "已合并", {review:{at, firstPass: !(t.reworks||[]).length, reasons: sel, note}});
+    else if (mode==="rework") await moveTask(t, "执行中", {reworks: (t.reworks||[]).concat([{at, reasons: sel, note}]).slice(-30)});
+    else if (mode==="drop") await moveTask(t, "已放弃", {dropReason: val("rv-drop"), dropNote: note});
+    if (wantRule) await addRule(note, target, t.project||"全局", t.id);
+    toast(mode==="merge"?"已合并":mode==="rework"?"已退回，任务回到执行中":"已放弃"+(wantRule?"，并新增 1 条规则":""));
+  },
+  "acc-add"(){ const t = getTask(S.openId); const tx = val("d-acc-new").trim(); if (!t || !tx) return; document.getElementById("d-acc-new").value = ""; patchTask(t.id, {acceptance:(t.acceptance||[]).concat([{text:tx, done:false}])}); },
+  "d-receipt"(){ const t = getTask(S.openId); if (!t) return; const r = parseReceipt(val("d-receipt")); if (!r){ toast("没有识别到回执，请检查格式"); return; }
+    const {patch, to} = receiptPatch(t, r); document.getElementById("d-receipt").value = "";
+    (["待评审","已合并","已放弃"].includes(t.status) ? patchTask(t.id, patch) : moveTask(t, to, patch)).then(()=>toast("回执已写入")); },
+  "del-task"(el){ const t = getTask(S.openId); if (!t) return; armed(el, ()=>{ const id=t.id; S.openId=null; store.del("tasks", id).then(()=>toast("已删除 "+id)); }, "再点一次确认删除"); },
+  copy(el){ const w = el.dataset.what; const t = getTask(S.openId);
+    if (w==="receipt-template") copyText(RECEIPT_TEMPLATE, "回执格式");
+    else if (w==="mcp-prompt") copyText(MCP_PROMPT, "同步指令");
+    else if (w==="brief" && t) copyText(taskBrief(t), "任务单");
+    else if (w==="task-md" && t) copyText(taskToMd(t), "Obsidian 笔记"); },
+  create(el){
+    const title = val("n-title").trim(); if (!title){ toast("请填写标题"); document.getElementById("n-title").focus(); return; }
+    const risk = (document.querySelector('input[name="n-risk"]:checked')||{}).value || "L2";
+    const doc = newTaskDoc({title, project: val("n-project"), agent: val("n-agent"), risk, status: val("n-status"), goal: val("n-goal").trim(),
+      acceptance: val("n-acc").split(/\n/).map(s=>s.trim()).filter(Boolean).map(text=>({text, done:false})), allow: val("n-allow").trim(), deny: val("n-deny").trim(),
+      budgetMin: num(val("n-budget")) ?? 60, spec: val("n-spec").trim(), branch: val("n-branch").trim()});
+    const id = newTaskId(); doc.id = id;
+    store.set("tasks", id, doc).then(()=>{ toast("已创建 "+id); if (el.dataset.copy) copyText(taskBrief(doc), "任务单"); });
+    S.openId = id; render();
+  },
+  "parse-receipt"(){ const r = parseReceipt(val("r-text")); S.receiptPreview = r ? {data:r, by:"local"} : {error: "没有识别到回执格式。" + (S.cap.sample ? "可以点“让 Claude 解析”。" : "请检查是否包含 task / summary 等字段。")}; render(); },
+  async "parse-receipt-ai"(el){ const tx = val("r-text").trim(); if (!tx){ toast("请先粘贴内容"); return; } el.disabled = true; el.textContent = "解析中…";
+    try { const r = await aiReceipt(tx); S.receiptPreview = r ? {data:r, by:"claude"} : {error:"没有提取到有效内容"}; } catch(e){ S.receiptPreview = {error: sampleErr(e) || "已取消"}; }
+    render(); },
+  async "apply-receipt"(){
+    const rp = S.receiptPreview; if (!rp || !rp.data) return; const r = rp.data; const target = val("r-task");
+    if (target==="__new" || !getTask(target)){
+      const {patch, to} = receiptPatch({}, r); const id = newTaskId();
+      const doc = Object.assign(newTaskDoc({title: (r.summary||"来自回执的任务").slice(0,60), status: to}), patch, {startedAt: nowIso()});
+      await store.set("tasks", id, doc); toast("已新建 "+id+" 并写入回执"); S.openId = id;
+    } else { const t = getTask(target); const {patch, to} = receiptPatch(t, r); await (["待评审","已合并","已放弃"].includes(t.status) ? patchTask(t.id, patch) : moveTask(t, to, patch)); toast("回执已写入 "+t.id); S.openId = t.id; }
+    S.receiptPreview = null; const ta = document.getElementById("r-text"); if (ta) ta.value = ""; render();
+  },
+  "clear-receipt"(){ S.receiptPreview = null; const ta = document.getElementById("r-text"); if (ta) ta.value = ""; render(); },
+  "add-rule"(){ const tx = val("ru-text").trim(); if (!tx){ toast("请填写规则内容"); return; } document.getElementById("ru-text").value = ""; addRule(tx, val("ru-target"), val("ru-scope")).then(()=>toast("已加入规则库")); },
+  "rule-status"(el){ const p = {status: el.dataset.to}; if (el.dataset.to==="已写入") p.writtenAt = nowIso(); store.update("rules", el.dataset.id, p); },
+  "rule-hit"(el){ const r = S.rules.find(x=>x.id===el.dataset.id); if (r) store.update("rules", r.id, {hits:(r.hits||1)+1}).then(()=>toast("已记录复现")); },
+  "rule-del"(el){ armed(el, ()=>store.del("rules", el.dataset.id)); },
+  "export-rules"(){ showText("规则文件片段", rulesSnippet(), "AGENTS-规则片段.md"); },
+  "suggest-rules"(){ suggestRules(); },
+  "add-suggest"(el){ const it = S.ruleSuggest && S.ruleSuggest.items && S.ruleSuggest.items[+el.dataset.i]; if (!it) return; it.added = true; addRule(it.text, it.target, it.scope).then(()=>toast("已加入规则库")); render(); },
+  week(el){ const d = +el.dataset.d; S.weekOffset = d===0 ? 0 : Math.min(0, S.weekOffset + d); S.retroDraft = null; render(); },
+  "save-retro"(el){ const k = el.dataset.week; store.set("retros", k, {notes: val("rt-notes"), actions: val("rt-actions"), updatedAt: nowIso()}).then(()=>toast("复盘已保存")); },
+  "draft-retro"(){ if (!draftCtl) draftRetro(); },
+  "stop-draft"(){ if (draftCtl) draftCtl.abort(); },
+  "use-draft"(){ const el = document.getElementById("rt-notes"); if (el && S.retroDraft) el.value = (el.value.trim() ? el.value.trim()+"\n\n" : "") + S.retroDraft.text; S.retroDraft = null; render(); toast("已放进笔记，记得保存"); },
+  "drop-draft"(){ S.retroDraft = null; render(); },
+  async "export-obsidian"(el){ el.disabled = true; try { const f = await buildExport(checked("x-all")); await saveFile(f.filename, f.data); } finally { el.disabled = false; } },
+  "export-json"(){ const d = new Date(); const data = JSON.stringify({app:"agent-workbench", version:1, exportedAt:d.toISOString(), config:S.config, tasks:S.tasks, rules:S.rules, retros:Object.values(S.retros)}, null, 2); saveFile("Agent工作台备份-"+d.toISOString().slice(0,10)+".json", data); },
+  "clear-samples"(el){ armed(el, async ()=>{ const ids = S.tasks.filter(t=>t.sample).map(t=>t.id); for (const id of ids) await store.del("tasks", id); toast("已清除 "+ids.length+" 个示例任务"); }, "再点一次确认清除"); },
+  "add-agent"(){ const a = val("cfg-agent").trim(); if (!a || S.config.agents.includes(a)) return; document.getElementById("cfg-agent").value = ""; saveConfig({agents: S.config.agents.concat([a])}); },
+  "rm-agent"(el){ const i = +el.dataset.i; saveConfig({agents: S.config.agents.filter((_,j)=>j!==i)}); },
+  "add-proj"(){ const n = val("np-name").trim(); if (!n){ toast("请填写项目名称"); return; } if (S.config.projects.some(p=>p.name===n)){ toast("已有同名项目"); return; } const path = val("np-path").trim(); document.getElementById("np-name").value = ""; document.getElementById("np-path").value = ""; saveConfig({projects: S.config.projects.concat([{name:n, path, stage:"开发中", stack:"", docs:"", verify:[], invariants:[], forbidden:[], protect:[], onboard:{}, ruleFiles:{}}])}); S.editProj = S.config.projects.length; },
+  "proj-edit"(el){ const i = +el.dataset.i; S.editProj = S.editProj === i ? null : i; render(); },
+  "proj-save"(el){ const i = +el.dataset.i; const p = S.config.projects[i]; if (!p) return;
+    const np = Object.assign({}, p, {stage: val("pe-stage"), path: val("pe-path").trim(), stack: val("pe-stack").trim(), docs: val("pe-docs").trim(), verify: lines(val("pe-verify")), invariants: lines(val("pe-inv")), forbidden: lines(val("pe-forbid")), protect: lines(val("pe-protect"))});
+    S.editProj = null; saveConfig({projects: S.config.projects.map((x,j)=> j===i ? np : x)}).then(()=>toast("档案已保存")); render(); },
+  "proj-kit"(el){ const p = S.config.projects[+el.dataset.i]; if (p) downloadKit(p); },
+  "proj-agents"(el){ const p = S.config.projects[+el.dataset.i]; if (p) viewAgentsMd(p); },
+  "proj-tasks"(el){ const p = S.config.projects[+el.dataset.i]; if (!p) return; S.filter.project = p.name; S.tab = "board"; S.openId = null; render(); window.scrollTo(0,0); },
+  "rm-proj"(el){ const i = +el.dataset.i; armed(el, ()=>{ S.editProj = null; saveConfig({projects: S.config.projects.filter((_,j)=>j!==i)}); }, "再点一次确认移除"); },
+  "modal-close"(){ closeModal(); },
+  "modal-copy"(){ const ta = $("#modal-text"); if (!ta) return; ta.select(); navigator.clipboard.writeText(ta.value).then(()=>toast("已复制"), ()=>toast("已选中，请手动复制")); },
+  "modal-save"(el){ const ta = $("#modal-text"); if (ta) saveFile(el.dataset.fn, ta.value); }
+};
+const NUMF = ["budgetMin","cost","minutes","ciRounds","lines"];
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]"); if (!el || el.matches("input,select,textarea")) return;
+  const fn = A[el.dataset.act]; if (fn){ e.preventDefault(); fn(el, e); }
+});
+document.addEventListener("change", e => {
+  const el = e.target;
+  if (el.dataset.act==="filter"){ S.filter[el.dataset.k] = el.type==="checkbox" ? el.checked : el.value; render(); return; }
+  if (el.dataset.act==="acc-toggle"){ const t = getTask(S.openId); if (!t) return; const acc = (t.acceptance||[]).map((a,i)=> i===+el.dataset.i ? Object.assign({}, a, {done: el.checked}) : a); patchTask(t.id, {acceptance: acc}); return; }
+  if (el.dataset.act==="onboard"){ const i = +el.dataset.i; const ps = S.config.projects.map((p,j)=> j===i ? Object.assign({}, p, {onboard: Object.assign({}, p.onboard||{}, {[el.dataset.k]: el.checked})}) : p); saveConfig({projects: ps}); return; }
+  if (el.name==="n-risk"){ const tip = $("#n-risk-tip"); if (tip) tip.textContent = RISK_TIP[el.value]||""; return; }
+  if (el.id==="imp-file" && el.files && el.files[0]){ importJson(el.files[0]); el.value = ""; return; }
+  if (el.dataset.f && S.openId){ const t = getTask(S.openId); if (!t) return; const f = el.dataset.f; let v = el.value;
+    if (NUMF.includes(f)) v = num(v); else v = String(v).trim();
+    if (f==="title" && !v){ el.value = t.title||""; toast("标题不能为空"); return; }
+    if (t[f] !== v) patchTask(t.id, f==="cost" ? {cost: v, costManual: v!=null} : {[f]: v}); }
+});
+document.addEventListener("input", e => { const el = e.target; if (el.dataset.act==="filter" && el.type==="search"){ S.filter.q = el.value; render(); } });
+document.addEventListener("keydown", e => { if (e.key==="Escape"){ if (modalEl) closeModal(); else if (S.openId){ S.openId=null; S.reviewMode=null; render(); } } });
+async function importJson(file){
+  let data; try { data = JSON.parse(await file.text()); } catch(e){ toast("文件不是有效的 JSON"); return; }
+  if (!data || data.app!=="agent-workbench"){ toast("这不是 Agent 工作台的备份文件"); return; }
+  const tasks = Array.isArray(data.tasks)?data.tasks:[], rules = Array.isArray(data.rules)?data.rules:[], retros = Array.isArray(data.retros)?data.retros:[];
+  toast("正在恢复 "+(tasks.length+rules.length+retros.length)+" 条记录…");
+  try {
+    if (data.config) await store.set("config","main", normalizeConfig(data.config));
+    for (const t of tasks) if (t && t.id) await store.set("tasks", String(t.id), t);
+    for (const r of rules) if (r && r.id) await store.set("rules", String(r.id), r);
+    for (const r of retros) if (r && r.id) await store.set("retros", String(r.id), r);
+    toast("恢复完成");
+  } catch(e){ reportErr(e); }
+}
+function normalizeConfig(c){
+  const agents = Array.isArray(c && c.agents) ? c.agents.map(String).filter(Boolean) : DEFAULT_AGENTS.slice();
+  const L = v => Array.isArray(v) ? v.map(String).filter(Boolean) : [];
+  const projects = Array.isArray(c && c.projects) ? c.projects.filter(p=>p&&p.name).map(p=>({name:String(p.name), path:String(p.path||p.repo||""), stage:String(p.stage||"开发中"), stack:String(p.stack||""), docs:String(p.docs||""),
+    verify:L(p.verify), invariants:L(p.invariants), forbidden:L(p.forbidden), protect:L(p.protect), onboard:(p.onboard&&typeof p.onboard==="object")?p.onboard:{}, ruleFiles:(p.ruleFiles&&typeof p.ruleFiles==="object")?p.ruleFiles:{}})) : [];
+  return {agents, projects};
+}
+
+/* ---------- projects & onboarding kit ---------- */
+const STAGES = ["规划","设计","开发中","维护","暂停"];
+const ONBOARD = [
+  ["git","本地 Git 仓库就绪","没有仓库就在项目根目录运行 git init；主分支用 main 或 master"],
+  ["connect","本机已连接 agent-hub","每台电脑运行一次 connect.mjs（见“接入”页），各 Agent 的 MCP 和遥测会自动配置"],
+  ["kit","装入接入包","下载本项目的接入包，运行 bash agent-kit-*/install.sh <项目目录>，按提示提交"],
+  ["verify","统一验证跑通","bash scripts/agent/verify.sh 全部 pass；不对就改档案里的验证命令后重新生成"],
+  ["first","首个任务走通","task.sh start → Agent 执行（任务单自动注入）→ 回执自动回传 → check → 评审 → merge"]
+];
+const DAILY = [
+  ["建任务","在工作台“录入”页，或 task.sh new \"标题\" --allow 'src/**'"],
+  ["开工","bash scripts/agent/task.sh start <任务编号> <简述>（分支 + worktree + 任务单，状态变为执行中）"],
+  ["交给 Agent","task.sh run <编号> claude|codex|cursor|kiro|code，或在 worktree 里自己打开；会话开始时钩子注入任务单"],
+  ["自动回传","Agent 结束时钩子跑统一验证、提取交付回执，任务进入“待评审”或“需介入”；成本经 OTel 汇总"],
+  ["机器检查","bash scripts/agent/task.sh check <任务编号>（验证 + 越界检查，结果写入任务）"],
+  ["人工评审","在工作台点“评审通过并合并”或“退回修改”，选原因；手机上也可以让 Claude 通过连接器评审"],
+  ["合并与清理","task.sh merge <任务编号>（自动标记已合并），再 task.sh clean <任务编号>"]
+];
+function projByName(n){ return S.config.projects.find(p=>p.name===n); }
+function onboardCount(p){ const o = p.onboard||{}; return ONBOARD.filter(([k])=>o[k]).length; }
+const lines = v => Array.isArray(v) ? v.map(x=>String(x).trim()).filter(Boolean) : String(v||"").split(/\n/).map(x=>x.trim()).filter(Boolean);
+const kitUrl = (p, what) => "/api/projects/"+encodeURIComponent(p.name)+"/"+what;
+async function viewAgentsMd(p){
+  try { const r = await fetch(kitUrl(p,"agents-md"), {credentials:"same-origin"}); if (!r.ok) throw new Error(r.status); showText("AGENTS.md · "+p.name, await r.text(), "AGENTS.md"); }
+  catch(e){ toast("生成失败，请重试"); }
+}
+async function downloadKit(p){
+  try { const r = await fetch(kitUrl(p,"kit.zip"), {credentials:"same-origin"}); if (!r.ok) throw new Error(r.status);
+    await saveFile("agent-kit-"+fileSafe(p.name)+".zip", await r.blob()); }
+  catch(e){ toast("接入包生成失败，请重试"); }
+}
+function projStats(name){
+  const ts = S.tasks.filter(t=>t.project===name);
+  const by = {}; ts.forEach(t=>{ by[t.status]=(by[t.status]||0)+1; });
+  const since = Date.now()-30*86400000;
+  const fin = ts.filter(t=>t.doneAt && new Date(t.doneAt).getTime()>=since);
+  const merged = fin.filter(t=>t.status==="已合并"); const first = merged.filter(t=>!(t.reworks||[]).length);
+  return {by, fin: fin.length, merged: merged.length, first: first.length, open: ts.filter(t=>OPEN.includes(t.status)).length};
+}
+function projCard(p, i){
+  const st = projStats(p.name); const n = onboardCount(p); const o = p.onboard||{};
+  const edit = S.editProj === i;
+  const chips = STATUSES.filter(s=>st.by[s] && s!=="已合并" && s!=="已放弃").map(s=>'<span class="pill st-'+esc(s)+'">'+esc(s)+' '+st.by[s]+'</span>').join(" ");
+  const v = lines(p.verify);
+  let h = '<div class="panel"><h2><span>'+esc(p.name)+' <span class="pill">'+esc(p.stage||"开发中")+'</span></span><small class="mono">接入 '+n+'/'+ONBOARD.length+'</small></h2>'+
+    (p.stack?'<p class="small" style="margin:0 0 4px">'+esc(p.stack)+'</p>':'')+
+    (p.path?'<p class="small mono muted" style="margin:0 0 8px">'+esc(p.path)+'</p>':'<p class="small muted" style="margin:0 0 8px">本地路径未填写</p>')+
+    '<div class="chips" style="margin-bottom:8px">'+(chips||'<span class="small muted">没有进行中的任务</span>')+'</div>'+
+    '<div class="meta" style="margin-bottom:10px"><div><span>近 30 天合并率</span>'+pct(st.merged, st.fin)+'</div><div><span>一次通过率</span>'+pct(st.first, st.merged)+'</div><div><span>统一验证</span>'+(v.length?v.length+' 条命令':'<span class="bad">未配置</span>')+'</div></div>'+
+    '<details class="more"'+(n<ONBOARD.length?' open':'')+'><summary>接入清单</summary><ul class="checks" style="margin-top:8px">'+
+      ONBOARD.map(([k,t,hint])=>'<li><input type="checkbox" id="ob-'+i+'-'+k+'" data-act="onboard" data-i="'+i+'" data-k="'+k+'"'+(o[k]?" checked":"")+'><label for="ob-'+i+'-'+k+'">'+esc(t)+'<div class="small muted">'+esc(hint)+'</div></label></li>').join("")+'</ul></details>'+
+    '<div class="btns" style="margin-top:10px">'+(S.cap.downloads?'<button class="btn sm pri" data-act="proj-kit" data-i="'+i+'">下载接入包</button>':'')+'<button class="btn sm" data-act="proj-agents" data-i="'+i+'">查看 AGENTS.md</button><button class="btn sm" data-act="proj-tasks" data-i="'+i+'">查看任务</button><button class="btn ghost sm" data-act="proj-edit" data-i="'+i+'">'+(edit?"收起档案":"编辑档案")+'</button></div>';
+  if (edit){
+    const ta = (id, label, arr, ph) => '<label class="f"><span>'+label+'</span><textarea id="'+id+'" class="code" placeholder="'+esc(ph||"")+'">'+esc(lines(arr).join("\n"))+'</textarea></label>';
+    h += '<div class="form" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">'+
+      '<div class="row c2"><label class="f"><span>阶段</span><select id="pe-stage">'+STAGES.map(s=>opt(s,p.stage||"开发中")).join("")+'</select></label><label class="f"><span>本地路径</span><input type="text" id="pe-path" value="'+esc(p.path||"")+'" placeholder="~/code/'+esc(p.name)+'"></label></div>'+
+      '<label class="f"><span>技术栈</span><input type="text" id="pe-stack" value="'+esc(p.stack||"")+'"></label>'+
+      '<label class="f"><span>设计文档</span><input type="text" id="pe-docs" value="'+esc(p.docs||"")+'"></label>'+
+      ta("pe-verify","统一验证命令（每行一条，按顺序执行）",p.verify,"npm run build")+
+      ta("pe-inv","不可破坏的约束（每行一条）",p.invariants)+
+      ta("pe-forbid","禁区（每行一条）",p.forbidden)+
+      ta("pe-protect","受保护路径（每行一个通配，* 可跨目录）",p.protect,"db/migrations/*")+
+      '<div class="btns"><button class="btn pri sm" data-act="proj-save" data-i="'+i+'">保存档案</button><button class="btn ghost sm" data-act="proj-edit" data-i="'+i+'">取消</button><button class="btn ghost sm bad" data-act="rm-proj" data-i="'+i+'">移除项目</button></div>'+
+      '<p class="hint" style="margin:0">改了验证命令、约束或受保护路径后，重新下载接入包并运行 install.sh，脚本会更新并备份旧版本。</p></div>';
+  }
+  return h + '</div>';
+}
+function viewProjects(){
+  const ps = S.config.projects;
+  return '<div class="stack">'+
+    '<details class="panel"'+(ps.some(p=>onboardCount(p)>=ONBOARD.length)?'':' open')+'><summary style="cursor:pointer"><b>落地步骤</b><span class="small muted">　每个项目接入一次，之后每个任务按循环走</span></summary><div class="grid2" style="margin-top:12px"><div><h2>接入一个本地项目</h2><ol style="margin:0;padding-left:1.3em">'+ONBOARD.map(([,t,h])=>'<li><b>'+esc(t)+'</b><div class="small muted">'+esc(h)+'</div></li>').join("")+'</ol></div>'+
+    '<div><h2>每个任务的循环</h2><ol style="margin:0;padding-left:1.3em">'+DAILY.map(([t,h])=>'<li><b>'+esc(t)+'</b><div class="small muted"'+(/^(bash|task\.sh)/.test(h)?' style="font-family:var(--mono)"':'')+'>'+esc(h)+'</div></li>').join("")+'</ol></div></div></details>'+
+    '<div class="grid2">'+ps.map(projCard).join("")+'</div>'+
+    '<p class="hint">本机还没连接 agent-hub？先去“接入”页复制一次性接入命令。接入包里的钩子和脚本在 hub 不可达时会静默跳过，不影响 Agent 工作。</p>'+
+    '<div class="panel"><h2>添加项目</h2><div class="row c2"><input type="text" id="np-name" placeholder="项目名称"><input type="text" id="np-path" placeholder="本地路径，例如 ~/code/my-app"></div><div class="btns" style="margin-top:8px"><button class="btn sm" data-act="add-proj">添加</button></div></div>'+
+  '</div>';
+}
+
+/* ---------- agent-hub：活动、接入 ---------- */
+function fmtTok(n){ n = n||0; return n>=1e6 ? (n/1e6).toFixed(1)+"M" : n>=1e3 ? Math.round(n/1e3)+"k" : String(n); }
+const AGENT_LABEL = {"claude-code":"Claude Code", codex:"Codex", cursor:"Cursor", copilot:"Copilot", kiro:"Kiro", cowork:"Cowork", "claude-ai":"Claude", gemini:"Gemini CLI", git:"git", "task-sh":"task.sh", human:"人工", mcp:"MCP"};
+const agentLabel = a => AGENT_LABEL[a] || a || "";
+const KIND_LABEL = {"session.start":"开始","session.end":"结束",edit:"修改",tool:"工具",stop:"一轮",response:"回复",receipt:"回执",deny:"拦截",check:"检查",commit:"提交",merge:"合并","task.start":"开工",mcp:"MCP",note:"记录",error:"出错",prompt:"输入","spec.task":"spec",subagent:"子任务",compact:"压缩"};
+function kindPill(k){ const cls = k==="deny"||k==="error" ? "st-需介入" : k==="receipt"||k==="merge" ? "st-已合并" : k==="check"||k==="task.start" ? "st-待评审" : k==="session.start" ? "st-执行中" : ""; return '<span class="pill '+cls+'">'+esc(KIND_LABEL[k]||k)+'</span>'; }
+function feedHtml(list, withTask){
+  return list.length ? '<ul class="feed">'+list.map(e=>'<li><span class="tm">'+esc(fmtDate(e.at))+'</span>'+kindPill(e.kind)+'<span class="sm" title="'+esc(e.summary)+'">'+esc(agentLabel(e.agent))+' · '+(withTask&&e.task?'<a href="#" data-act="open" data-id="'+esc(e.task)+'">'+esc(e.task)+'</a> · ':'')+esc(e.summary)+'</span></li>').join("")+'</ul>' : '<div class="empty">还没有活动。</div>';
+}
+function activityHtml(t){
+  const a = S.hub.activity[t.id]; const ck = t.lastCheck;
+  let h = '<div class="sec"><h4>Agent 活动 <span class="muted small">钩子 · MCP · git · task.sh 自动记录</span></h4>';
+  if (ck) h += '<p class="small" style="margin:0 0 8px">最近检查（'+esc(fmtDate(ck.at))+' · '+esc(ck.by||"")+'）：'+(ck.ok?'<span class="ok">通过</span>':'<span class="bad">未通过</span>')+
+    ((ck.verify||[]).length ? ' · '+ck.verify.map(v=>esc((v.result==="pass"?"✓ ":"✗ ")+v.cmd)).join("，") : '')+
+    ((ck.outOfScope||[]).length ? ' · <span class="bad">越界 '+ck.outOfScope.length+' 个文件：'+esc(ck.outOfScope.slice(0,5).join("、"))+'</span>' : '')+
+    (ck.added||ck.removed ? ' · +'+ck.added+' / −'+ck.removed : '')+'</p>';
+  if (!a || a.loading) h += '<div class="empty">加载中…</div>';
+  else {
+    if (a.sessions.length) h += '<div class="tbl" style="margin-bottom:8px"><table><thead><tr><th>会话</th><th>Agent</th><th>模型</th><th class="num">成本</th><th class="num">token</th><th class="num">修改</th><th class="num">拦截</th><th>最近</th></tr></thead><tbody>'+
+      a.sessions.map(x=>'<tr><td class="mono small">'+esc(String(x.id).slice(0,8))+'</td><td>'+esc(agentLabel(x.agent))+'</td><td class="small">'+esc(x.model||"—")+'</td><td class="num">$'+(x.cost_usd||0).toFixed(2)+'</td><td class="num">'+fmtTok((x.tokens_in||0)+(x.tokens_out||0))+'</td><td class="num">'+(x.edits||0)+'</td><td class="num">'+(x.denies||0)+'</td><td class="small">'+esc(ago(x.last_at))+'</td></tr>').join("")+'</tbody></table></div>';
+    h += feedHtml(a.events.slice(0,40), false);
+  }
+  return h + '</div>';
+}
+async function loadActivity(id){
+  if (!window.hub) return;
+  if (!S.hub.activity[id]) S.hub.activity[id] = {events:[], sessions:[], loading:true};
+  try { const r = await hub.req("GET", "/api/tasks/"+encodeURIComponent(id)+"/activity?limit=60"); S.hub.activity[id] = {events:r.events||[], sessions:r.sessions||[]}; }
+  catch(e){ S.hub.activity[id] = {events:[], sessions:[]}; }
+  if (S.openId===id) scheduleRender();
+}
+async function refreshStatus(){
+  if (!window.hub) return;
+  try { S.hub.status = await hub.req("GET", "/api/agents/status"); } catch(e){}
+  if (S.tab==="agents") scheduleRender();
+}
+async function loadFeed(){
+  if (!window.hub) return;
+  try { S.hub.feed = await hub.req("GET", "/api/events?limit=30"); } catch(e){}
+  scheduleRender();
+}
+const AGENT_ROWS = [
+  ["claude-code","Claude Code","钩子 · MCP · OTel 成本"],
+  ["codex","Codex","钩子 · MCP · OTel token"],
+  ["cursor","Cursor","钩子 · MCP"],
+  ["copilot","Copilot（CLI / VS Code / 云端 Agent）","钩子 · MCP"],
+  ["kiro","Kiro","钩子 · MCP · steering"],
+  ["claude-ai","Claude 网页 / 手机 / Cowork","MCP 自定义连接器（OAuth）"],
+  ["cowork","Claude 桌面版 / 本机 Cowork","MCP（mcp-remote 桥接）"],
+  ["task-sh","task.sh / git 钩子","开工、检查、提交、合并"]
+];
+function snippet(id, text){ return '<code class="cmd" id="'+id+'">'+esc(text)+'</code><div class="btns" style="margin-top:6px"><button class="btn sm" data-act="copy-el" data-target="'+id+'">复制</button></div>'; }
+function viewAgents(){
+  const st = S.hub.status; const caps = S.hub.caps || {};
+  const base = caps.baseUrl || location.origin; const mcp = base+"/mcp";
+  const by = {}; ((st&&st.agents)||[]).forEach(a=>{ by[a.agent]=a; });
+  const ch = (a,c) => { const t = a && a.channels && a.channels[c]; if (!t) return '<span class="small muted">—</span>'; const fresh = Date.now()-new Date(t).getTime() < 86400000; return '<span class="small"><i class="dot '+(fresh?"on":"warm")+'"></i>'+esc(ago(t))+'</span>'; };
+  const row = (k, n, how) => { const a = by[k]; return '<tr><td><b>'+esc(n)+'</b>'+(how?'<div class="small muted">'+esc(how)+'</div>':'')+'</td><td>'+ch(a,"hooks")+'</td><td>'+ch(a,"mcp")+'</td><td>'+ch(a,"otel")+'</td><td class="num">'+(a?a.events24h||0:0)+'</td><td class="num">'+(a?a.sessions7d||0:0)+'</td><td class="num">'+(a&&a.cost7dUsd?"$"+a.cost7dUsd.toFixed(2):"—")+'</td></tr>'; };
+  const rows = AGENT_ROWS.map(r=>row(r[0],r[1],r[2])).join("") + ((st&&st.agents)||[]).filter(a=>!AGENT_ROWS.some(r=>r[0]===a.agent)).map(a=>row(a.agent, agentLabel(a.agent), "")).join("");
+  const connect = "curl -fsS "+base+"/connect.mjs -o /tmp/agent-hub-connect.mjs && node /tmp/agent-hub-connect.mjs --url "+base+" --token <HUB_TOKEN>";
+  const manual = [
+    ["Claude Code", "claude mcp add --transport http --scope user agent-hub \""+mcp+"?agent=claude-code\" --header \"Authorization: Bearer <HUB_TOKEN>\""],
+    ["Codex（~/.codex/config.toml）", "[mcp_servers.agent-hub]\nurl = \""+mcp+"?agent=codex\"\nhttp_headers = { \"Authorization\" = \"Bearer <HUB_TOKEN>\" }"],
+    ["Cursor（~/.cursor/mcp.json）", JSON.stringify({mcpServers:{"agent-hub":{url:mcp+"?agent=cursor", headers:{Authorization:"Bearer <HUB_TOKEN>"}}}}, null, 2)],
+    ["VS Code / Copilot（用户 mcp.json）", JSON.stringify({servers:{"agent-hub":{type:"http", url:mcp+"?agent=copilot", headers:{Authorization:"Bearer <HUB_TOKEN>"}}}}, null, 2)],
+    ["Kiro（~/.kiro/settings/mcp.json）", JSON.stringify({mcpServers:{"agent-hub":{url:mcp+"?agent=kiro", headers:{Authorization:"Bearer <HUB_TOKEN>"}}}}, null, 2)]
+  ];
+  const claudeAi = caps.oauth
+    ? '<p class="hint">已开启 OAuth。在 claude.ai → 设置 → 连接器 → 添加自定义连接器，地址填：</p>'+snippet("s-claudeai", mcp)+'<p class="hint" style="margin-top:8px">授权页会要求输入 HUB_TOKEN。连接后在网页、手机和 Cowork 里都能说“看看 agent-hub 今天要处理什么”“把 T… 退回，原因是验证不足”。</p>'
+    : '<p class="hint">claude.ai 的连接器从 Anthropic 的服务器访问 hub，需要公网 HTTPS 地址：给 hub 配一个 Cloudflare Tunnel 或 Tailscale Funnel 域名，在 .env 里设置 <code>PUBLIC_URL</code> 和 <code>OAUTH_ENABLED=1</code> 后重启（见 docs/DEPLOY.md）。只在本机用可以跳过。</p>';
+  return '<div class="stack">'+
+    '<div class="panel"><h2>接入状态 <small><button class="btn ghost sm" data-act="refresh-status">刷新</button></small></h2><p class="hint">每个 Agent 最近一次通过钩子、MCP、OTel 上报的时间。绿点表示 24 小时内有上报。</p>'+
+      '<div class="tbl"><table><thead><tr><th>Agent</th><th>钩子</th><th>MCP</th><th>OTel</th><th class="num">24h 事件</th><th class="num">7 天会话</th><th class="num">7 天成本</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>'+
+    '<div class="grid2"><div class="stack">'+
+      '<div class="panel"><h2>① 本机一次性接入 <small>每台电脑一次</small></h2><p class="hint">写入 ~/.config/agent-hub/env，把 hub 注册为已安装 Agent 的 MCP 服务器，并给 Claude Code、Codex 打开遥测（成本回传）。改动前自动备份；先加 <code>--dry-run</code> 看会改什么。</p>'+snippet("s-connect", connect)+'</div>'+
+      '<div class="panel"><h2>② 项目接入 <small>每个仓库一次</small></h2><p class="hint">在“项目”页下载接入包并运行 install.sh：AGENTS.md、各 Agent 的钩子（Claude Code、Codex、Cursor、Copilot、Kiro）、统一验证、task.sh 和 git 钩子。</p><div class="btns"><button class="btn sm" data-act="tab" data-k="projects">去项目页</button></div></div>'+
+      '<div class="panel"><h2>③ Claude 网页 / 手机 / Cowork</h2>'+claudeAi+'</div>'+
+    '</div><div class="stack">'+
+      '<div class="panel"><h2>手动配置 MCP <small>connect.mjs 已自动完成时可跳过</small></h2><p class="hint">MCP 地址：<code>'+esc(mcp)+'</code>，鉴权头 <code>Authorization: Bearer &lt;HUB_TOKEN&gt;</code>。URL 上的 <code>?agent=</code> 用来区分来源。</p>'+
+        manual.map(([n,t],i)=>'<details class="more"'+(i?'':' open')+'><summary class="small">'+esc(n)+'</summary><div style="margin-top:8px">'+snippet("s-m"+i, t)+'</div></details>').join("")+'</div>'+
+      '<div class="panel"><h2>最近活动 <small>实时</small></h2>'+feedHtml(S.hub.feed.slice(0,25), true)+'</div>'+
+    '</div></div></div>';
+}
+
+/* ---------- boot ---------- */
+const VIEWS = {today: viewToday, board: viewBoard, projects: viewProjects, agents: viewAgents, capture: viewCapture, rules: viewRules, retro: viewRetro, export: viewExport};
+let raf = 0; function scheduleRender(){ if (raf) return; raf = requestAnimationFrame(()=>{ raf = 0; render(); }); }
+function subErr(e){ if (e && e.code==="revoked"){ S.mode="local"; } scheduleRender(); }
+async function init(){
+  render();
+  if (!window.claude || typeof window.claude.use !== "function"){ S.mode = "local"; render(); return; }
+  const use = n => window.claude.use(n).catch(()=>null);
+  const [db, dl, sm] = await Promise.all([use("db"), use("downloads"), use("sample")]);
+  S.cap.downloads = dl; S.cap.sample = sm;
+  if (!db){ S.mode = "local"; render(); return; }
+  S.cap.db = db; S.mode = "db";
+  db.collection("tasks").onSnapshot(s => { S.tasks = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.tasks = true; scheduleRender(); }, subErr);
+  db.collection("rules").onSnapshot(s => { S.rules = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.rules = true; scheduleRender(); }, subErr);
+  db.collection("retros").onSnapshot(s => { const o = {}; s.docs.forEach(d=>{ o[d.id] = Object.assign({}, d.data(), {id:d.id}); }); S.retros = o; S.loaded.retros = true; scheduleRender(); }, subErr);
+  db.doc("config/main").onSnapshot(d => { if (d.exists) S.config = normalizeConfig(d.data()); S.loaded.config = true; scheduleRender(); }, subErr);
+  try { S.hub.caps = await hub.caps(); } catch(e){}
+  refreshStatus(); loadFeed();
+  if (S.tab==="agents") refreshStatus();
+  window.addEventListener("hub:event", e => {
+    const ev = e.detail; if (!ev) return;
+    S.hub.feed.unshift(ev); S.hub.feed = S.hub.feed.slice(0, 60);
+    if (ev.task && S.hub.activity[ev.task] && !S.hub.activity[ev.task].loading) S.hub.activity[ev.task].events.unshift(ev);
+    if (ev.task && S.openId===ev.task && /^(session|receipt|check)/.test(ev.kind)) loadActivity(ev.task);
+    if (S.tab==="today" || S.tab==="agents" || (S.openId && S.openId===ev.task)) scheduleRender();
+  });
+  window.addEventListener("hub:online", e => { if (S.hub.online !== e.detail){ S.hub.online = e.detail; scheduleRender(); } });
+  setInterval(refreshStatus, 60000);
+  render();
+}
+init();
+})();
+</script>
+
+</body></html>

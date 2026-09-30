@@ -1,0 +1,14 @@
+node_modules
+data
+.env
+test
+docs
+*.log
+.git
+output
+.playwright-cli
+migrate
+.wrangler
+.cloudflare
+.dev.vars*
+dist

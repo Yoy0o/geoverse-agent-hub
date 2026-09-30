@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# agent/* 分支上的提交：后台上报 agent-hub（任务活动里能看到每次提交），不影响提交速度。
+b=$(git symbolic-ref --short HEAD 2>/dev/null) || exit 0
+case "$b" in agent/*) ;; *) exit 0 ;; esac
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -f "$root/scripts/agent/hub.sh" ] || exit 0
+sha=$(git rev-parse --short HEAD); msg=$(git log -1 --pretty=%s)
+stat=$(git diff --shortstat HEAD~1 HEAD 2>/dev/null | sed 's/^ *//')
+( bash "$root/scripts/agent/hub.sh" event commit "提交 $sha：$msg${stat:+（$stat）}" >/dev/null 2>&1 & )
+exit 0
