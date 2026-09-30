@@ -1,0 +1,4 @@
+# Local Wrangler only; copy to .dev.vars and replace the placeholder token.
+HUB_TOKEN=replace-with-a-random-token-of-at-least-24-characters
+LOCAL_DEV=1
+PUBLIC_URL=http://127.0.0.1:8788

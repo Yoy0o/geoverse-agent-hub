@@ -1,6 +1,6 @@
 // 任务领域逻辑：与界面里的规则保持一致（状态流、回执解析、任务单生成、指标）
 import crypto from "node:crypto";
-import { getDoc, setDoc, updateDoc, listDocs } from "./db.js";
+import { getDoc, setDoc, updateDoc, listDocs } from "#hub/db";
 
 export const STATUSES = ["待规格", "待执行", "执行中", "需介入", "待评审", "已合并", "已放弃"];
 export const OPEN = ["待规格", "待执行", "执行中", "需介入", "待评审"];

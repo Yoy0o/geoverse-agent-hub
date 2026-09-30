@@ -21,6 +21,8 @@ const DRY = flag("dry-run");
 const OTEL = !flag("no-otel");
 let URL_ = (opt("url", process.env.AGENT_HUB_URL || "__HUB_URL__") || "").replace(/\/+$/, "");
 let TOKEN = opt("token", process.env.AGENT_HUB_TOKEN || "");
+const CF_ID = opt("access-client-id", process.env.CF_ACCESS_CLIENT_ID || "");
+const CF_SECRET = opt("access-client-secret", process.env.CF_ACCESS_CLIENT_SECRET || "");
 const log = (...a) => console.log(...a);
 const done = [];
 
@@ -53,7 +55,8 @@ function removeTomlTable(text, header) {
   return out.join("\n").replace(/\n{3,}/g, "\n\n");
 }
 const mcpUrl = (agent) => `${URL_}/mcp?agent=${agent}`;
-const auth = () => ({ Authorization: "Bearer " + TOKEN });
+const auth = () => ({ Authorization: "Bearer " + TOKEN, ...(CF_ID && CF_SECRET ? { "CF-Access-Client-Id": CF_ID, "CF-Access-Client-Secret": CF_SECRET } : {}) });
+const tomlHeaders = () => "{ " + Object.entries(auth()).map(([k, v]) => `${tomlStr(k)} = ${tomlStr(v)}`).join(", ") + " }";
 const vscodeUserDir = () => process.platform === "darwin" ? path.join(HOME, "Library/Application Support/Code/User")
   : process.platform === "win32" ? path.join(process.env.APPDATA || HOME, "Code/User") : path.join(HOME, ".config/Code/User");
 const claudeDesktopConfig = () => process.platform === "darwin" ? path.join(HOME, "Library/Application Support/Claude/claude_desktop_config.json")
@@ -78,7 +81,7 @@ const AGENTS = {
         o.env = Object.assign({}, o.env || {}, {
           CLAUDE_CODE_ENABLE_TELEMETRY: "1", OTEL_LOGS_EXPORTER: "otlp", OTEL_METRICS_EXPORTER: "otlp",
           OTEL_EXPORTER_OTLP_PROTOCOL: "http/json", OTEL_EXPORTER_OTLP_ENDPOINT: URL_,
-          OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Bearer%20" + TOKEN, OTEL_LOGS_EXPORT_INTERVAL: "5000",
+          OTEL_EXPORTER_OTLP_HEADERS: Object.entries(auth()).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join(","), OTEL_LOGS_EXPORT_INTERVAL: "5000",
         });
       }, "Claude Code 遥测");
     },
@@ -89,11 +92,11 @@ const AGENTS = {
       const p = path.join(HOME, ".codex/config.toml");
       let t = exists(p) ? fs.readFileSync(p, "utf8") : "";
       t = removeTomlTable(t, "mcp_servers.agent-hub").trimEnd();
-      t += `\n\n[mcp_servers.agent-hub]\nurl = ${tomlStr(mcpUrl("codex"))}\nhttp_headers = { "Authorization" = ${tomlStr("Bearer " + TOKEN)} }\n`;
+      t += `\n\n[mcp_servers.agent-hub]\nurl = ${tomlStr(mcpUrl("codex"))}\nhttp_headers = ${tomlHeaders()}\n`;
       let otelNote = "";
       if (OTEL) {
         if (/^\s*\[otel\]\s*$/m.test(t)) otelNote = "已有 [otel] 配置，未修改（要把成本回传 hub，把 exporter 指向 " + URL_ + "/v1/logs，protocol = \"json\"）";
-        else t += `\n[otel]\nlog_user_prompt = false\nexporter = { otlp-http = { endpoint = ${tomlStr(URL_ + "/v1/logs")}, protocol = "json", headers = { "Authorization" = ${tomlStr("Bearer " + TOKEN)} } } }\n`;
+        else t += `\n[otel]\nlog_user_prompt = false\nexporter = { otlp-http = { endpoint = ${tomlStr(URL_ + "/v1/logs")}, protocol = "json", headers = ${tomlHeaders()} } }\n`;
       }
       writeFile(p, t.replace(/^\n+/, ""));
       done.push(["Codex MCP" + (OTEL && !otelNote ? " + 遥测" : ""), p]);
@@ -121,18 +124,20 @@ const AGENTS = {
     run() {
       const local = /^http:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(URL_);
       const a = ["-y", "mcp-remote", mcpUrl("cowork"), "--header", "Authorization:${AGENT_HUB_AUTH}"];
+      if (CF_ID && CF_SECRET) a.push("--header", "CF-Access-Client-Id:${CF_ACCESS_CLIENT_ID}", "--header", "CF-Access-Client-Secret:${CF_ACCESS_CLIENT_SECRET}");
       if (URL_.startsWith("http://") && !local) a.push("--allow-http");
-      editJson(claudeDesktopConfig(), (o) => { o.mcpServers = o.mcpServers || {}; o.mcpServers["agent-hub"] = { command: "npx", args: a, env: { AGENT_HUB_AUTH: "Bearer " + TOKEN } }; }, "Claude 桌面版 MCP");
+      editJson(claudeDesktopConfig(), (o) => { o.mcpServers = o.mcpServers || {}; o.mcpServers["agent-hub"] = { command: "npx", args: a, env: { AGENT_HUB_AUTH: "Bearer " + TOKEN, ...(CF_ID && CF_SECRET ? { CF_ACCESS_CLIENT_ID: CF_ID, CF_ACCESS_CLIENT_SECRET: CF_SECRET } : {}) } }; }, "Claude 桌面版 MCP");
     },
   },
 };
 
 async function main() {
+  if (!!CF_ID !== !!CF_SECRET) { console.error("Access Client ID 与 Secret 必须同时提供"); process.exit(1); }
   if (!URL_ || URL_.includes("__HUB" + "_URL__")) { console.error("缺少 --url，例如 --url http://127.0.0.1:8787"); process.exit(1); }
   if (!TOKEN) {
     if (!process.stdin.isTTY) { console.error("缺少 --token"); process.exit(1); }
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    TOKEN = (await rl.question("HUB_TOKEN（在 hub 的启动日志或 data/hub-token 里）：")).trim(); rl.close();
+    TOKEN = (await rl.question("HUB_TOKEN（运行 node src/cli.js token 查看，或使用云端部署密钥）：")).trim(); rl.close();
   }
   log(`agent-hub：${URL_}${DRY ? "（dry-run，不会改任何文件）" : ""}`);
   try {
@@ -143,7 +148,8 @@ async function main() {
   } catch (e) { console.error("✗ 连不上 hub：" + e.message + "。先确认 hub 已启动、地址可达"); process.exit(1); }
 
   const envFile = path.join(HOME, ".config/agent-hub/env");
-  writeFile(envFile, `AGENT_HUB_URL=${URL_}\nAGENT_HUB_TOKEN=${TOKEN}\n`, 0o600);
+  if ([URL_, TOKEN, CF_ID, CF_SECRET].some(value => /[\r\n]/.test(value))) { console.error("连接配置不能包含换行"); process.exit(1); }
+  writeFile(envFile, `AGENT_HUB_URL=${URL_}\nAGENT_HUB_TOKEN=${TOKEN}\nCF_ACCESS_CLIENT_ID=${CF_ID}\nCF_ACCESS_CLIENT_SECRET=${CF_SECRET}\n`, 0o600);
   if (!DRY) try { fs.chmodSync(envFile, 0o600); } catch { /* Windows */ }
   done.push(["仓库脚本读取的连接配置", envFile]);
 

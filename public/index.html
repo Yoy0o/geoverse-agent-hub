@@ -1,9 +1,6 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Agent 工作台 · agent-hub</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%230B6E66%22/%3E%3Cpath d=%22M9 11h14M9 16h14M9 21h9%22 stroke=%22white%22 stroke-width=%222.6%22 stroke-linecap=%22round%22/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap">
 <style>
 :root{
   --bg:#F2F5F4; --surface:#FFFFFF; --surface-2:#E8EEEC; --line:#D3DDDA; --line-2:#BFCCC8;
@@ -955,7 +952,7 @@ function newTaskDoc(o){
 const A = {
   tab(el){ S.tab = el.dataset.k; S.openId = null; S.reviewMode = null; try{ localStorage.setItem("awb.tab", S.tab); }catch(e){} if (S.tab==="agents") refreshStatus(); render(); window.scrollTo(0,0); },
   open(el){ S.openId = el.dataset.id; S.reviewMode = null; S.reviewSel = []; loadActivity(S.openId); render(); },
-  logout(){ fetch("/api/logout", {method:"POST"}).finally(()=>location.reload()); },
+  logout(){ fetch("/api/logout", {method:"POST",headers:{"X-Requested-With":"agent-hub"}}).finally(()=>location.reload()); },
   "refresh-status"(){ refreshStatus(); toast("已刷新"); },
   "copy-el"(el){ const t = document.getElementById(el.dataset.target); if (t) copyText(t.textContent, "内容"); },
   close(){ S.openId = null; S.reviewMode = null; render(); },

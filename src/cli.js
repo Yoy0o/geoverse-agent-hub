@@ -1,7 +1,7 @@
 // 命令行：node src/cli.js <import 备份.json | export [文件] | token | stats>
 import fs from "node:fs";
-import { config } from "./config.js";
-import { stats, listDocs } from "./db.js";
+import { config } from "#hub/config";
+import { stats, listDocs } from "#hub/db";
 import { importBackup } from "./api.js";
 import { getConfig } from "./domain.js";
 

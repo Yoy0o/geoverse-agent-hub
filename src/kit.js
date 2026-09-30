@@ -1,12 +1,8 @@
 // 接入包生成：项目级（AGENTS.md、各 Agent 钩子配置、脚本、git 钩子）+ 本机级（connect.mjs）
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { template as tpl } from "#hub/templates";
 import JSZip from "jszip";
 import { lines, relevantRules, RECEIPT_TEMPLATE } from "./domain.js";
 
-const KIT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "kit");
-const tpl = (f) => fs.readFileSync(path.join(KIT, f), "utf8");
 const shq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
 const fileSafe = (s) => String(s || "").replace(/[\\/:*?"<>|#^[\]]/g, "-").replace(/\s+/g, " ").trim().slice(0, 80) || "untitled";
 const J = (o) => JSON.stringify(o, null, 2) + "\n";

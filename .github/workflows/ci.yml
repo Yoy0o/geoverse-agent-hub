@@ -1,0 +1,26 @@
+name: Verify Agent Hub
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WRANGLER_SEND_METRICS: "false"
+      CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:security
+      - run: node --disable-warning=ExperimentalWarning test/oauth.mjs
+      - run: npm run build:cloudflare
+      - run: npm run types:cloudflare
+      - run: npm run test:cloudflare

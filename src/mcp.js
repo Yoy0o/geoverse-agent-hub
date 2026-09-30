@@ -2,13 +2,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { setDoc, updateDoc, addEvent, sessionsForTask } from "./db.js";
+import { setDoc, updateDoc, addEvent, sessionsForTask } from "#hub/db";
 import {
   STATUSES, OPEN, RISKS, REASONS, TARGETS, agentName, getTask, allTasks, allRules, getConfig, projByName, newTaskId, newTaskDoc,
   moveTask, patchTask, reviewTask, applyReceipt, normReceipt, taskBrief, relevantRules, attention, metrics,
 } from "./domain.js";
 import { markChannel } from "./ingest.js";
-import { config } from "./config.js";
+import { config } from "#hub/config";
 
 const text = (s) => ({ content: [{ type: "text", text: String(s) }] });
 const json = (o) => text(JSON.stringify(o, null, 2));

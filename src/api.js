@@ -1,6 +1,6 @@
 // REST API：网页（文档库 + 实时推送）、task.sh / git 钩子、导入导出
-import { bus, validColl, validId, getDoc, listDocs, setDoc, updateDoc, deleteDoc, listEvents, sessionsForTask, sessionsSince, agentStatus, stats, transaction } from "./db.js";
-import { config, hubBaseUrl } from "./config.js";
+import { bus, validColl, validId, getDoc, listDocs, setDoc, updateDoc, deleteDoc, listEvents, sessionsForTask, sessionsSince, agentStatus, stats, transaction } from "#hub/db";
+import { config, hubBaseUrl } from "#hub/config";
 import {
   STATUSES, AGENT_NAMES, agentName, getTask, allTasks, getConfig, normalizeConfig, projByName, projByRepo, newTaskId, newTaskDoc, moveTask, patchTask,
   reviewTask, applyReceipt, parseReceipt, normReceipt, taskBrief,
@@ -50,9 +50,12 @@ export function apiRoutes(app, auth) {
     const send = (type, payload) => res.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
     const onDoc = (e) => send("doc", e);
     const onEv = (e) => send("agent-event", e);
+    const onRevoke = (sessionHash) => { if (req.who.sessionHash === sessionHash) res.end(); };
     bus.on("doc", onDoc); bus.on("event", onEv);
+    bus.on("auth-revoked", onRevoke);
     const ping = setInterval(() => res.write(": ping\n\n"), 25000);
-    req.on("close", () => { clearInterval(ping); bus.off("doc", onDoc); bus.off("event", onEv); });
+    const expiry = req.who.expiresAt ? setTimeout(() => res.end(), Math.min(Math.max(1, req.who.expiresAt - Date.now()), 2147483647)) : null;
+    req.on("close", () => { clearInterval(ping); clearTimeout(expiry); bus.off("doc", onDoc); bus.off("event", onEv); bus.off("auth-revoked", onRevoke); });
   });
 
   /* ---------- 任务（task.sh、脚本、网页共用） ---------- */

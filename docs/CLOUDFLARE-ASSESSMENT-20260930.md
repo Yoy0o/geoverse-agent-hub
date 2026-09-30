@@ -2,6 +2,8 @@
 
 评估日期：2026-09-30（Asia/Shanghai）。范围：当前交付源码、脱敏后的本地配置、现有服务的匿名访问行为，以及 Cloudflare 官方文档。此次没有修改业务代码、启用 Tunnel、部署云端服务或修改 Cloudflare 策略。
 
+后续更新：本文件保留改造前的评估证据。随后已完成 Workers + Durable Objects SQLite 适配、会话撤销与过期检查、私人响应禁用缓存、令牌日志修复和 Access 服务凭证接入；最新操作说明与验证结果见 [Cloudflare 部署指南](CLOUDFLARE-DEPLOY.md)。尚未实际发布云端。
+
 ## 结论
 
 当前项目适合通过 **现有 Docker 服务 + Cloudflare Tunnel + Cloudflare Access** 提供私人远程访问。项目已预留 Tunnel 服务，部署改动主要在配置与身份策略；若本机 Agent 继续使用 localhost，现有接入脚本可以沿用。

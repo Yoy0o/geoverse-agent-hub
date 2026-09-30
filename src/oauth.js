@@ -4,8 +4,8 @@ import crypto from "node:crypto";
 import express from "express";
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { InvalidGrantError, InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
-import { kv } from "./db.js";
-import { config } from "./config.js";
+import { kv } from "#hub/db";
+import { config } from "#hub/config";
 import { safeEqual } from "./auth.js";
 
 const H = (s) => crypto.createHash("sha256").update(String(s)).digest("hex");
@@ -84,16 +84,16 @@ export function oauthRoutes(app) {
     provider, issuerUrl: base, baseUrl: base, resourceServerUrl: new URL(config.publicUrl + "/mcp"),
     resourceName: "agent-hub", scopesSupported: ["hub"],
   }));
-  const tries = new Map();
   app.post("/oauth/approve", express.urlencoded({ extended: false, limit: "8kb" }), (req, res) => {
     const rid = String(req.body.rid || ""); const p = kv.get("oauth:pending:" + rid);
     if (!p) return res.status(400).type("text/plain").send("授权请求已过期，请回到 Claude 重新连接。");
-    const n = (tries.get(rid) || 0) + 1; tries.set(rid, n);
+    const attemptKey = "oauth:tries:" + rid;
+    const n = (kv.get(attemptKey) || 0) + 1; kv.set(attemptKey, n, 10 * 60000);
     if (!safeEqual(String(req.body.token || "").trim(), config.token)) {
       if (n >= 5) { kv.del("oauth:pending:" + rid); return res.status(429).type("text/plain").send("尝试次数过多，请重新发起连接。"); }
       return clientsStore.getClient(p.clientId).then((c) => res.status(401).set("X-Frame-Options", "DENY").type("html").send(consentPage(c || {}, p.redirectUri, rid, "令牌不对")));
     }
-    kv.del("oauth:pending:" + rid); tries.delete(rid);
+    kv.del("oauth:pending:" + rid); kv.del(attemptKey);
     const code = rnd(24);
     kv.set("oauth:code:" + H(code), { clientId: p.clientId, codeChallenge: p.codeChallenge, redirectUri: p.redirectUri, scopes: p.scopes, resource: p.resource }, 10 * 60000);
     const u = new URL(p.redirectUri); u.searchParams.set("code", code); if (p.state) u.searchParams.set("state", p.state);

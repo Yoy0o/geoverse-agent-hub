@@ -12,11 +12,12 @@
 # 临时关闭上报：AGENT_HUB_DISABLE=1
 
 HUB_URL="${AGENT_HUB_URL:-}"; HUB_TOKEN="${AGENT_HUB_TOKEN:-}"
+HUB_CF_ID="${CF_ACCESS_CLIENT_ID:-}"; HUB_CF_SECRET="${CF_ACCESS_CLIENT_SECRET:-}"
 _hub_conf="${AGENT_HUB_CONFIG:-$HOME/.config/agent-hub/env}"
 if [ -z "$HUB_URL" ] && [ -r "$_hub_conf" ]; then
   while IFS='=' read -r _k _v; do
     _v=${_v%$'\r'}; _v=${_v#\"}; _v=${_v%\"}
-    case "$_k" in AGENT_HUB_URL) HUB_URL=$_v ;; AGENT_HUB_TOKEN) HUB_TOKEN=$_v ;; esac
+    case "$_k" in AGENT_HUB_URL) HUB_URL=$_v ;; AGENT_HUB_TOKEN) HUB_TOKEN=$_v ;; CF_ACCESS_CLIENT_ID) HUB_CF_ID=$_v ;; CF_ACCESS_CLIENT_SECRET) HUB_CF_SECRET=$_v ;; esac
   done < "$_hub_conf"
 fi
 HUB_URL=${HUB_URL%/}
@@ -33,7 +34,13 @@ hub_task() {
   printf '%s' "$id"
 }
 hub_repo() { local m; m=$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p'); basename "${m:-$PWD}"; }
-hub_curl() { curl -sS --connect-timeout 1 "$@" -H "Authorization: Bearer $HUB_TOKEN" -H "X-Hub-Task: $(hub_task)" -H "X-Hub-Branch: $(hub_branch)" -H "X-Hub-Repo: $(hub_b64 "$(hub_repo)")"; }
+hub_curl() {
+  local access_headers=()
+  if [ -n "$HUB_CF_ID" ] && [ -n "$HUB_CF_SECRET" ]; then
+    access_headers=(-H "CF-Access-Client-Id: $HUB_CF_ID" -H "CF-Access-Client-Secret: $HUB_CF_SECRET")
+  fi
+  curl -sS --connect-timeout 1 "$@" "${access_headers[@]}" -H "Authorization: Bearer $HUB_TOKEN" -H "X-Hub-Task: $(hub_task)" -H "X-Hub-Branch: $(hub_branch)" -H "X-Hub-Repo: $(hub_b64 "$(hub_repo)")"
+}
 hub_api() {
   local m=$1 p=$2 d=${3:-}
   if [ -z "$HUB_URL" ]; then echo "agent-hub 未配置：运行 connect.mjs 或设置 AGENT_HUB_URL / AGENT_HUB_TOKEN" >&2; return 2; fi

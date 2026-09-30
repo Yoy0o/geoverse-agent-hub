@@ -1,0 +1,34 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "geoverse-agent-hub",
+  "main": "src/cloudflare/worker.js",
+  "compatibility_date": "2026-09-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "secrets": { "required": ["HUB_TOKEN"] },
+  "build": { "command": "node scripts/cloudflare-build.mjs" },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "HUB", "class_name": "AgentHub" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AgentHub"] }],
+  "vars": {
+    "HUB_INSTANCE": "personal",
+    "ACCESS_ALLOWED_EMAILS": "hio250@163.com",
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+    "ACCESS_SERVICE_IDS": "",
+    "PUBLIC_URL": "",
+    "OAUTH_ENABLED": "0",
+    "HUB_STORE_PAYLOAD": "summary",
+    "EVENT_RETENTION_DAYS": "90",
+    "SESSION_TTL_SECONDS": "604800"
+  },
+  "observability": { "enabled": true, "head_sampling_rate": 0.1 },
+  "dev": { "ip": "127.0.0.1", "port": 8788 }
+}

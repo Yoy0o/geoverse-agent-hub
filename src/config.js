@@ -35,6 +35,7 @@ export const config = {
   // 打开后 claude.ai / Cowork / Claude 手机端可以通过 OAuth 把 hub 加为自定义连接器（需要 HTTPS 的 PUBLIC_URL）
   oauth: bool(env.OAUTH_ENABLED, false) && !!publicUrl,
   cookieSecure: publicUrl.startsWith("https://"),
+  sessionTtlSeconds: Math.max(1, Math.min(num(env.SESSION_TTL_SECONDS, 7 * 86400), 30 * 86400)),
   usdToCny: num(env.USD_CNY, 7.2),
   // 钩子载荷的存储方式：summary 只存摘要字段；full 存完整载荷（截断到 32KB）；none 不存载荷
   storePayload: (env.HUB_STORE_PAYLOAD || "summary").toLowerCase(),

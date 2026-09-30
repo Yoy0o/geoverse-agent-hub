@@ -3,6 +3,7 @@
 自托管的 Agent 工作台：把原来 claude.ai 上的「Agent 工作台」页面搬到自己的机器上，并让各家 coding agent **自动**上报任务状态、交付回执和成本。
 
 - **一个服务**：Node 22 + SQLite，单容器，`docker compose up -d` 即可
+- **Cloudflare 原生部署**：Workers + Durable Objects SQLite，支持同样的 REST、SSE、MCP、钩子与 OAuth；全站默认要求 Access 签名身份，参见 [Cloudflare 部署指南](docs/CLOUDFLARE-DEPLOY.md)
 - **原界面不变**：今日 / 看板 / 项目 / 录入 / 规则库 / 复盘 / 导出，新增「接入」页和任务「Agent 活动」
 - **四条接入通道**：MCP（读任务单、交回执）、钩子（注入任务单、拦截受保护路径、结束前验证、回传回执）、OTel（成本 / token）、git 钩子与 task.sh（开工、检查、提交、合并）
 - **已适配**：Claude Code、Codex、Cursor、GitHub Copilot（CLI / VS Code / 云端 Agent）、Kiro；Claude 网页 / 手机 / Cowork 通过 OAuth 连接器接入
@@ -41,6 +42,32 @@ bash scripts/agent/task.sh merge <任务编号>           # 合并，hub 标记�
 ```
 
 完整部署说明（服务器 / 公网 / claude.ai 连接器 / 各 Agent 细节 / 排查）见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+
+## Cloudflare
+
+```powershell
+npm ci
+Copy-Item .dev.vars.example .dev.vars   # 填入独立的本地测试令牌
+npm run dev:cloudflare                 # http://127.0.0.1:8788
+npm run build:cloudflare               # 校验与打包，不发布
+```
+
+云端发布前，按 [部署指南](docs/CLOUDFLARE-DEPLOY.md) 配置自定义域名、Access Team Domain、应用 AUD 与 Hub Secret，再运行 `npm run deploy:cloudflare`。默认关闭 `workers.dev` 和预览 URL；缺少密钥或身份配置时拒绝提供网页与数据。个人数据保存在 SQLite Durable Object 中，部署无需当前电脑保持开机。
+
+网页登录使用随机、持久化、可撤销的会话，默认 7 天有效；退出会使旧 Cookie 立即失效。Agent 仍使用 Hub Bearer 令牌；远程接入可额外传入 Access 服务凭证。
+
+## 验证
+
+```powershell
+npm run test:security
+node --disable-warning=ExperimentalWarning test/oauth.mjs
+npm run build:cloudflare
+npm run test:cloudflare
+docker build -f test/Dockerfile -t agent-hub:test .
+docker run --rm agent-hub:test
+```
+
+Linux 上也可直接 `npm test`。测试使用合成数据和隔离的临时存储；私人迁移备份、`.env`、`.dev.vars` 与运行数据不提交到 Git。GitHub CI 自动执行验证，不自动发布云端。
 
 ## 不用 Docker
 

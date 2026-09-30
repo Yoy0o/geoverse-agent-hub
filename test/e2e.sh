@@ -23,7 +23,7 @@ for i in $(seq 1 30); do curl -sf "$AGENT_HUB_URL/api/health" >/dev/null && brea
 echo "== 1. 启动与导入 =="
 check "health" '[ "$(curl -s $AGENT_HUB_URL/api/health | jget o.ok)" = "true" ]'
 check "未带令牌 401" '[ "$(curl -s -o /dev/null -w %{http_code} $AGENT_HUB_URL/api/tasks)" = "401" ]'
-BK=$(ls "$ROOT"/migrate/*.json 2>/dev/null | head -n 1)
+BK="$ROOT/test/fixtures/workbench.json"
 [ -n "$BK" ] && check "导入原工作台备份" '[ "$(api -X POST --data-binary @$BK $AGENT_HUB_URL/api/import | jget o.tasks)" -ge 1 ]'
 CFG=$(api "$AGENT_HUB_URL/api/docs/config/main" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const o=JSON.parse(s).data;o.projects=(o.projects||[]).filter(p=>p.name!=='demo');o.projects.push({name:'demo',path:'/tmp/x/demo-app',stage:'开发中',stack:'bash',verify:['test -f README.md','bash check.sh'],invariants:['README 必须存在'],forbidden:[],protect:['db/migrations/*','*.lock']});console.log(JSON.stringify(o))})")
 api -X PUT --data-binary "$CFG" "$AGENT_HUB_URL/api/docs/config/main" >/dev/null

@@ -1,6 +1,6 @@
 // 可选的 LLM 辅助：网页里“让 Claude 解析回执 / 提炼规则 / 起草复盘”在自托管环境下走这里
 // 支持 Anthropic Messages API，或任何 OpenAI 兼容的 Chat Completions 接口（DeepSeek、通义、Kimi、本地 vLLM 等）
-import { config } from "./config.js";
+import { config } from "#hub/config";
 
 export function llmEnabled() { return !!(config.llm.provider && config.llm.apiKey && config.llm.model); }
 

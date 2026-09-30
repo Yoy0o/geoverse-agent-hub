@@ -6,7 +6,13 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/server.js",
     "cli": "node --disable-warning=ExperimentalWarning src/cli.js",
-    "test": "bash test/e2e.sh"
+    "test": "bash test/e2e.sh",
+    "dev:cloudflare": "wrangler dev",
+    "build:cloudflare": "wrangler deploy --dry-run --outdir .cloudflare/dist",
+    "deploy:cloudflare": "wrangler deploy",
+    "types:cloudflare": "wrangler types .cloudflare/worker-configuration.d.ts",
+    "test:security": "node --test test/security.test.mjs",
+    "test:cloudflare": "node test/cloudflare.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
@@ -22,7 +28,21 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260930.1",
-    "esbuild": "^0.28.2",
+    "@types/node": "^22.20.4",
     "wrangler": "^4.144.0"
+  },
+  "imports": {
+    "#hub/config": {
+      "workerd": "./src/cloudflare/config.js",
+      "default": "./src/config.js"
+    },
+    "#hub/db": {
+      "workerd": "./src/cloudflare/db.js",
+      "default": "./src/db.js"
+    },
+    "#hub/templates": {
+      "workerd": "./src/cloudflare/templates.js",
+      "default": "./src/templates.js"
+    }
   }
 }

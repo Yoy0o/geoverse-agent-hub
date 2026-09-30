@@ -1,7 +1,7 @@
 // OpenTelemetry 接收（OTLP/HTTP JSON）：Claude Code、Codex 的遥测 → 会话成本 / token / 改动行数 → 汇总到任务
 import zlib from "node:zlib";
-import { config } from "./config.js";
-import { touchSession, bumpSession, getSession, kv } from "./db.js";
+import { config } from "#hub/config";
+import { touchSession, bumpSession, getSession, kv } from "#hub/db";
 import { resolveTask, recomputeUsage, markChannel } from "./ingest.js";
 
 function val(v) {

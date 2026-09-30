@@ -1,0 +1,8 @@
+{
+  "app": "agent-workbench",
+  "version": 1,
+  "config": { "agents": ["Codex", "Claude Code"], "projects": [] },
+  "tasks": [{ "id": "T260930-fixture", "title": "Synthetic import fixture", "status": "待执行", "risk": "L2", "history": [] }],
+  "rules": [],
+  "retros": []
+}

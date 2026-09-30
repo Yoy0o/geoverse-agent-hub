@@ -4,14 +4,16 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { once } from "node:events";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-const PORT = 8793, BASE = `http://localhost:${PORT}`, TOKEN = "oauth-test-token";
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ah-oauth-"));
-const hub = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", "src/server.js"], { env: { ...process.env, PORT: String(PORT), HUB_TOKEN: TOKEN, HUB_DATA_DIR: dir, PUBLIC_URL: BASE, OAUTH_ENABLED: "1" }, stdio: ["ignore", "pipe", "pipe"] });
-let log = ""; hub.stdout.on("data", (d) => (log += d)); hub.stderr.on("data", (d) => (log += d));
-const fail = (m) => { console.error("✗ " + m + "\n" + log); hub.kill(); process.exit(1); };
+const PORT = 8793, BASE = process.env.TEST_HUB_URL || `http://localhost:${PORT}`, TOKEN = process.env.TEST_HUB_TOKEN || "oauth-test-token";
+const external = !!process.env.TEST_HUB_URL;
+const dir = external ? null : fs.mkdtempSync(path.join(os.tmpdir(), "ah-oauth-"));
+const hub = external ? null : spawn(process.execPath, ["--disable-warning=ExperimentalWarning", "src/server.js"], { env: { ...process.env, PORT: String(PORT), HUB_TOKEN: TOKEN, HUB_DATA_DIR: dir, PUBLIC_URL: BASE, OAUTH_ENABLED: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+let log = ""; hub?.stdout.on("data", (d) => (log += d)); hub?.stderr.on("data", (d) => (log += d));
+const fail = (m) => { console.error("✗ " + m + "\n" + log); hub?.kill(); process.exit(1); };
 const ok = (c, m) => (c ? console.log("✓ " + m) : fail(m));
 for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + "/api/health")).ok) break; } catch { /* 等待 */ } await new Promise((r) => setTimeout(r, 100)); }
 
@@ -60,5 +62,9 @@ ok(reuse.status === 400 && (await reuse.json()).error === "invalid_grant", "旧�
 const apiWithOauth = await fetch(BASE + "/api/tasks", { headers: { Authorization: "Bearer " + rt.access_token } });
 ok(apiWithOauth.status === 200, "OAuth 令牌也能读 REST API");
 
-hub.kill(); fs.rmSync(dir, { recursive: true, force: true });
+if (hub) {
+  const closed = once(hub, "exit"); hub.kill(); await closed;
+  if (path.dirname(path.resolve(dir)) !== path.resolve(os.tmpdir()) || !path.basename(dir).startsWith("ah-oauth-")) throw new Error("Unsafe test cleanup path");
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
 console.log("OAuth 流程全部通过");

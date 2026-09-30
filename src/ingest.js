@@ -1,6 +1,6 @@
 // 事件接入：把各 Agent 的钩子载荷归一化，关联到任务和会话，并据此推进任务状态
-import { addEvent, touchSession, bumpSession, getSession, sessionsForTask, kv } from "./db.js";
-import { config } from "./config.js";
+import { addEvent, touchSession, bumpSession, getSession, sessionsForTask, kv } from "#hub/db";
+import { config } from "#hub/config";
 import { TASK_ID_RE, AGENT_NAMES, agentName, getTask, moveTask, patchTask, findReceipt, applyReceipt, ensureAgentListed, taskBrief } from "./domain.js";
 
 const lc = (s) => String(s || "").toLowerCase().replace(/[^a-z]/g, "");
@@ -176,13 +176,11 @@ export function sessionStartResponse(agent, context) {
 }
 
 // 各接入通道最近一次出现的时间（“接入”页用）
-const lastMark = new Map();
 export function markChannel(agent, channel) {
   if (!agent || !channel) return;
   const k = agent + "|" + channel; const t = Date.now();
-  if (t - (lastMark.get(k) || 0) < 30000) return;
-  lastMark.set(k, t);
   const m = kv.get("channels") || {};
+  if (t - (Date.parse(m[k] || "") || 0) < 30000) return;
   m[k] = new Date(t).toISOString();
   kv.set("channels", m);
 }

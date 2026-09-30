@@ -29,7 +29,7 @@
     const el = document.createElement("div");
     el.className = "modal";
     el.innerHTML = '<form class="box" style="grid-template-rows:auto auto auto" id="hub-login"><header>登录 agent-hub</header>' +
-      '<div><p class="hint">输入 HUB_TOKEN（hub 首次启动时打印在日志里，也保存在数据目录的 hub-token 文件中）。</p>' +
+      '<div><p class="hint">输入 HUB_TOKEN（本地运行 node src/cli.js token 查看；Cloudflare 使用部署时设置的密钥）。</p>' +
       '<input type="password" id="hub-token" autocomplete="current-password" placeholder="ah_…" style="width:100%"><p class="hint bad" id="hub-login-err" hidden></p></div>' +
       '<footer class="btns"><button class="btn pri" type="submit">登录</button></footer></form>';
     document.body.appendChild(el);
