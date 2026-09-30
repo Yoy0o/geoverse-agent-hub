@@ -36,10 +36,12 @@ hub_task() {
 hub_repo() { local m; m=$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p'); basename "${m:-$PWD}"; }
 hub_curl() {
   local access_headers=()
+  local connect_timeout="${AGENT_HUB_CONNECT_TIMEOUT:-5}"
+  case "$connect_timeout" in ''|*[!0-9]*) connect_timeout=5 ;; esac
   if [ -n "$HUB_CF_ID" ] && [ -n "$HUB_CF_SECRET" ]; then
     access_headers=(-H "CF-Access-Client-Id: $HUB_CF_ID" -H "CF-Access-Client-Secret: $HUB_CF_SECRET")
   fi
-  curl -sS --connect-timeout 1 "$@" "${access_headers[@]}" -H "Authorization: Bearer $HUB_TOKEN" -H "X-Hub-Task: $(hub_task)" -H "X-Hub-Branch: $(hub_branch)" -H "X-Hub-Repo: $(hub_b64 "$(hub_repo)")"
+  curl -sS --connect-timeout "$connect_timeout" "$@" "${access_headers[@]}" -H "Authorization: Bearer $HUB_TOKEN" -H "X-Hub-Task: $(hub_task)" -H "X-Hub-Branch: $(hub_branch)" -H "X-Hub-Repo: $(hub_b64 "$(hub_repo)")"
 }
 hub_api() {
   local m=$1 p=$2 d=${3:-}
@@ -92,7 +94,9 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     task) hub_task; echo; exit 0 ;;
     ping)
       if [ -z "$HUB_URL" ]; then echo "未配置"; exit 2; fi
-      if hub_api GET /api/capabilities >/dev/null; then echo "已连接 $HUB_URL"; else echo "连接失败：$HUB_URL" >&2; exit 1; fi ;;
+      capabilities=$(hub_api GET /api/capabilities) || { echo "连接失败：$HUB_URL" >&2; exit 1; }
+      if [[ "$capabilities" == *'"version"'* && "$capabilities" == *'"baseUrl"'* && "$capabilities" != *'<html'* ]]; then echo "已连接 $HUB_URL"
+      else echo "未取得 Hub 认证响应：检查地址、令牌与 Access 服务凭证" >&2; exit 1; fi ;;
     *) sed -n '2,13p' "$0" ;;
   esac
 fi

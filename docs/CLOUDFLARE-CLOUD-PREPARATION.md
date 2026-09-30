@@ -2,9 +2,9 @@
 
 核对日期：2026-09-30。目标：单人使用的 Agent Hub；用户目前没有自有域名，采用 Workers + SQLite Durable Objects + Cloudflare Access，使用账户的 `workers.dev` 地址。
 
-**已完成私人生产部署与本人登录验收。** 入口：[打开云端工作台](https://geoverse-agent-hub.libra-liuyb.workers.dev)。先用 `hio250@163.com` 完成 Access 邮箱验证码登录，再使用独立云端 HUB_TOKEN 登录 Hub；原本本地 Hub 的令牌不适用于云端。用户已选择保持云端空工作台，不导入本地数据。
+**已完成私人生产部署、本人登录与本机 MCP 接入验收。** 入口：[打开云端工作台](https://geoverse-agent-hub.libra-liuyb.workers.dev)。先用 `hio250@163.com` 完成 Access 邮箱验证码登录，再使用独立云端 HUB_TOKEN 登录 Hub；原本本地 Hub 的令牌不适用于云端。最初保持空工作台，随后按新的接入请求仅登记当前仓库的项目和初始任务，未导入本地已有数据。日常操作分别见[本地管理指南](LOCAL-MANAGEMENT-GUIDE.md)和[远程管理指南](REMOTE-MANAGEMENT-GUIDE.md)。
 
-当前生产版本于 **2026-09-30 15:40（Asia/Shanghai）** 发布，版本 ID `e96e592b-cdc4-4a37-9147-b4c04d9e3303`，部署 ID `891af6d3-5903-458f-9f16-d89d5d6a073c`。Cloudflare API 已核对 `enabled=true`、`previews_enabled=false`、自定义域名列表为空。PUBLIC_URL 与真实 ACCESS_AUD 已填入；第 6–8 节均已执行，后续更新直接运行 `npm run deploy:cloudflare`。本机密钥文件 `.cloudflare/bootstrap-secrets.json` 仍保留，需本人存入密码管理器后再删除，不提交 Git。
+当前生产版本于 **2026-09-30 16:21（Asia/Shanghai）** 发布，版本 ID `922c56e0-599f-45ea-a480-78d8319e0058`，部署 ID `3c0032de-94e3-4b67-8f18-8bf30f0ab757`；包含本机服务凭证白名单、独立连接配置及 Bash 云端连接修复。此前 15:40 的版本 `e96e592b-cdc4-4a37-9147-b4c04d9e3303` 已验证持久化及浏览器读写。Cloudflare API 已核对 `enabled=true`、`previews_enabled=false`、自定义域名列表为空。PUBLIC_URL 与真实 ACCESS_AUD 已填入；第 6–8 节均已执行，后续更新直接运行 `npm run deploy:cloudflare`。本机密钥文件 `.cloudflare/bootstrap-secrets.json` 仍保留，需本人存入密码管理器后再删除，不提交 Git。
 
 首次创建历史：2026-09-30 14:29 先以关闭入口的版本 `1cbb2778-9d81-43b3-8903-989497a956b5` 创建 Worker，部署 ID `a282f474-8951-4aef-80b0-a879b3ea0393`。当时 `enabled=false`、`previews_enabled=false`，地址返回 404 / 1042；HUB_TOKEN 上传为 `secret_text`，SQLite DO 命名空间 `d5fe8ce040764582972ad1604ba8a69a` 的 `use_sqlite=true`。完成 Access 策略后才开放生产入口。
 
@@ -27,7 +27,7 @@
 | Access 应用 | `e28041f6-bb96-49e1-a700-39a7adfeca17` | Worker 级 All traffic，目标 Worker ID `78b925638b10498c8397e857f5473563` |
 | Access AUD | `a049a951794c5484ed385de14964e4732d6170423f8a2287b1ac64c70705a67e` | 远程应用与本地配置一致 |
 | 身份提供商 | Personal email OTP，type=`onetimepin` | ID `3dee978b-874d-4ff7-9d03-76fe9bed67e0`；应用仅允许此提供商 |
-| Access 策略 | 仅本人邮箱，要求 OTP；会话 24h | 无 Everyone、Bypass 或 Service Auth；Worker 另行校验签名与身份 |
+| Access 策略 | 本人邮箱 OTP（会话 24h）+ 指定本机 Service Auth | 无 Everyone 或 Bypass；Worker 另行校验签名、AUD、邮箱/机器白名单 |
 | Durable Objects | 已创建 `geoverse-agent-hub_AgentHub`，SQLite 存储 | 首次创建后通过 Cloudflare API 核对 |
 
 截图中的管理员邮箱被截断，现已通过 Wrangler 核对完整管理员身份，本文不重复发布该管理邮箱。截图中的勾选本身不能证明私人保护有效；本次已实际创建 OTP 和 Access 应用，并完成匿名拦截及本人登录后的读写验收。
@@ -77,7 +77,7 @@ SQLite Durable Objects 可以在 Workers Free 上使用，本项目无需改成 
 | `PUBLIC_URL` | 目标 `https://geoverse-agent-hub.libra-liuyb.workers.dev`；bootstrap 时保持空，配置 Access 后填写 |
 | `ACCESS_AUD` | 本项目 Access 应用的 Application Audience (AUD) Tag，通常为 64 位十六进制字符串 |
 | `ACCESS_ALLOWED_EMAILS` | 暂为 `hio250@163.com`；应与 Access Allow 策略一致 |
-| `ACCESS_SERVICE_IDS` | 暂空；以后填指定机器 Service Token 的 Client ID，逗号分隔 |
+| `ACCESS_SERVICE_IDS` | 已填本机 `b0adc3f78cd3bc11cdb061576dea8675.access`；以后增加其他指定机器 ID 时用逗号分隔 |
 | `HUB_INSTANCE` | 保持 `personal`；更改会访问另一个空数据库 |
 
 `account_id`、团队域名、AUD 和 Client ID 是标识符。`HUB_TOKEN`、Cloudflare API Token、Client Secret、模型 API Key 是密钥，不能放进该表、聊天或 Git。
@@ -192,7 +192,7 @@ npm run deploy:cloudflare
 - Hub 退出返回 200，随后数据请求返回 401，原 SSE 流已关闭；验收后已恢复本人登录。
 - 云端 Access 策略和全部入口配置已复核；没有另一个邮箱的实际拒绝登录测试，也未做高负载或长期额度验证。上线后的 CPU/用量需继续观察。
 
-用户选择**保持云端空工作台**。以下为以后需要迁移时的验收和恢复步骤，本次不执行迁移：
+上述初次部署验收时云端保持空工作台。随后用户要求本机连接与初始登记，已新增一个项目和任务，详见第 13 节；本次仍不迁移已有本地业务数据。以下为以后需要迁移时的验收和恢复步骤：
 
 1. 用未登录的无痕窗口访问入口：应先到 Access 登录或拒绝页，不能直接打开 Hub 静态页面。
 2. 同样测试 `/shim.js`、`/api/health`、`/api/export`、`/mcp`。Access 可返回登录重定向或拒绝状态；关键是没有取得私人内容，而非所有匿名请求必须固定 401。
@@ -227,7 +227,7 @@ node kit/connect.mjs --url https://geoverse-agent-hub.libra-liuyb.workers.dev --
 - 已增加 bootstrap/生产部署前配置检查，并接入 npm 发布命令和 CI。
 - 本机 Wrangler 已完成 OAuth 授权；已创建 OTP 与 Worker 级 Access 应用，填入真实 AUD 和 PUBLIC_URL 后开放受保护入口，预览入口仍关闭。
 - 已在不提交的 `.cloudflare/bootstrap-secrets.json` 生成独立云端 Secret 文件，验证不会覆盖已有密钥；首次创建已将 HUB_TOKEN 上传为云端 Secret。本机副本仍需本人存入密码管理器。
-- 已按用户要求先创建关闭入口的 Worker 及 SQLite DO 命名空间，再完成私人生产部署、读写/SSE/持久化/退出验收。未开通付费订阅，未迁移私人数据，临时任务已删除，云端保持空工作台。
+- 已按用户要求先创建关闭入口的 Worker 及 SQLite DO 命名空间，再完成私人生产部署、读写/SSE/持久化/退出验收。未开通付费订阅，未迁移已有本地数据，临时测试任务已删除；后续根据新请求登记的项目和任务保留。
 
 ## 12. 借鉴官方 Agent Setup 提示
 
@@ -246,3 +246,11 @@ node kit/connect.mjs --url https://geoverse-agent-hub.libra-liuyb.workers.dev --
 五个连接均已完成必要的准备：四个账户连接的 OAuth 进程返回 Successfully logged in，文档连接不需要登录，并通过用户环境的 `codex mcp list` 核对配置。当前会话不会自动获得新增 MCP 工具，重启/重新打开 Codex 后加载；后续认证过期时再对相应服务器执行 `codex mcp login <名称>`。这些管理连接不代表应用已部署。[Codex MCP 官方说明](https://developers.openai.com/codex/mcp)
 
 Wrangler 登录、Cloudflare MCP 登录、浏览器 Access 登录和 Hub 登录是不同认证层。开发管理连接的 OAuth 不可替代应用访问的 Access AUD、白名单和 HUB_TOKEN。
+
+## 13. 本机连接与初始登记
+
+用户明确批准创建本机专用 30 天 Access 服务凭证后，已创建 `GeoVerse DIY-Liu workstation`，ID `6dcbba27-5977-472b-bd63-e4e21c6145bb`，到期时间 2026-10-30 16:00:53（Asia/Shanghai）。本应用的专用 Service Auth 策略 ID 为 `a427ffc5-5af4-4081-8f6c-cdd2c513576f`，只包括此凭证；Worker 同时只允许其 Client ID。Client Secret 仅在本机保存，未写入 Git。
+
+本机 Codex 增加 `agent-hub-local` 与 `agent-hub-cloud`，脚本配置分别为用户目录 `.config/agent-hub/local.env` 和 `cloud.env`，不覆盖默认 `env`。两个 MCP 均完成握手和业务工具读写验证。源代码仍在本机，云端 Hub 只管理状态和数据。
+
+仅登记 `geoverse-agent-hub` 项目及任务：本地 `T260930-x6r`、云端 `T260930-2eo`。本地旧项目/任务保留；云端现为 1 个项目、1 个任务、0 条规则、0 个复盘。后续维护按两份日常使用指南执行。

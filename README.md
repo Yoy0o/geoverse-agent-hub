@@ -54,6 +54,8 @@ npm run build:cloudflare               # 校验与打包，不发布
 
 云端发布前，按 [部署指南](docs/CLOUDFLARE-DEPLOY.md) 配置入口、Access Team Domain、应用 AUD 与 Hub Secret。没有自有域名时按 [当前账户的云端准备指南](docs/CLOUDFLARE-CLOUD-PREPARATION.md) 使用 `workers.dev` + Access；新实例先用 `bootstrap:cloudflare` 创建关闭入口的 Worker，完成 Access 后再运行 `deploy:cloudflare`。发布命令包含配置检查，首次发布还需 secrets-file。当前实例已在 Access 保护下开放，预览 URL 保持关闭；缺少密钥或身份配置时拒绝提供网页与数据。个人数据保存在 SQLite Durable Object 中，部署无需当前电脑保持开机。
 
+日常操作分别见 [本地管理使用指南](docs/LOCAL-MANAGEMENT-GUIDE.md) 与 [远程管理使用指南](docs/REMOTE-MANAGEMENT-GUIDE.md)。本机可同时使用 `agent-hub-local` / `agent-hub-cloud` MCP；连接脚本的 `--name` 与 `--profile` 保存独立配置，两端任务数据不自动同步。
+
 网页登录使用随机、持久化、可撤销的会话，默认 7 天有效；退出会使旧 Cookie 立即失效。Agent 仍使用 Hub Bearer 令牌；远程接入可额外传入 Access 服务凭证。
 
 ## 验证

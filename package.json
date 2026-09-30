@@ -16,6 +16,7 @@
     "test:preflight": "node --test test/cloudflare-preflight.test.mjs",
     "types:cloudflare": "wrangler types .cloudflare/worker-configuration.d.ts",
     "test:security": "node --test test/security.test.mjs",
+    "test:connect": "node --test test/connect.test.mjs",
     "test:cloudflare": "node test/cloudflare.mjs"
   },
   "dependencies": {

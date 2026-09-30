@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // agent-hub 本机接入（每台电脑运行一次）：
-//   node connect.mjs --url __HUB_URL__ --token <HUB_TOKEN> [--agents claude,codex,cursor,vscode,copilot,kiro,claude-desktop] [--no-otel] [--dry-run]
+//   node connect.mjs --url __HUB_URL__ [--agents codex] [--name agent-hub-cloud] [--profile cloud] [--no-otel] [--dry-run]
+// 令牌优先通过 AGENT_HUB_TOKEN 环境变量提供；--profile 将脚本凭据保存到独立的 <profile>.env。
 // 做四件事：
 //   1. 写入 ~/.config/agent-hub/env（仓库里的 hub.sh 从这里读地址和令牌，权限 600）
 //   2. 把 agent-hub 注册为各 Agent 的 MCP 服务器（用户级配置，改之前自动备份）
@@ -19,6 +20,8 @@ const flag = (k) => args.includes("--" + k);
 const HOME = os.homedir();
 const DRY = flag("dry-run");
 const OTEL = !flag("no-otel");
+const SERVER_NAME = opt("name", "agent-hub");
+const PROFILE = opt("profile", "");
 let URL_ = (opt("url", process.env.AGENT_HUB_URL || "__HUB_URL__") || "").replace(/\/+$/, "");
 let TOKEN = opt("token", process.env.AGENT_HUB_TOKEN || "");
 const CF_ID = opt("access-client-id", process.env.CF_ACCESS_CLIENT_ID || "");
@@ -49,7 +52,7 @@ function removeTomlTable(text, header) {
   const lines = text.split("\n"); const out = []; let skip = false;
   for (const l of lines) {
     const h = l.match(/^\s*\[([^\]]+)\]\s*$/);
-    if (h) skip = h[1].trim() === header;
+    if (h) skip = h[1].trim() === header || h[1].trim().startsWith(header + ".");
     if (!skip) out.push(l);
   }
   return out.join("\n").replace(/\n{3,}/g, "\n\n");
@@ -68,14 +71,14 @@ const AGENTS = {
     run() {
       const cfg = { type: "http", url: mcpUrl("claude-code"), headers: auth() };
       if (which("claude")) {
-        if (DRY) log("  [dry-run] claude mcp add-json -s user agent-hub …");
+        if (DRY) log(`  [dry-run] claude mcp add-json -s user ${SERVER_NAME} …`);
         else {
-          try { execFileSync("claude", ["mcp", "remove", "agent-hub", "-s", "user"], { stdio: "ignore" }); } catch { /* 不存在 */ }
-          execFileSync("claude", ["mcp", "add-json", "agent-hub", JSON.stringify(cfg), "-s", "user"], { stdio: "ignore" });
+          try { execFileSync("claude", ["mcp", "remove", SERVER_NAME, "-s", "user"], { stdio: "ignore" }); } catch { /* 不存在 */ }
+          execFileSync("claude", ["mcp", "add-json", SERVER_NAME, JSON.stringify(cfg), "-s", "user"], { stdio: "ignore" });
         }
         done.push(["Claude Code MCP", "claude mcp（用户级）"]);
       } else {
-        editJson(path.join(HOME, ".claude.json"), (o) => { o.mcpServers = o.mcpServers || {}; o.mcpServers["agent-hub"] = cfg; }, "Claude Code MCP");
+        editJson(path.join(HOME, ".claude.json"), (o) => { o.mcpServers = o.mcpServers || {}; o.mcpServers[SERVER_NAME] = cfg; }, "Claude Code MCP");
       }
       if (OTEL) editJson(path.join(HOME, ".claude/settings.json"), (o) => {
         o.env = Object.assign({}, o.env || {}, {
@@ -91,8 +94,8 @@ const AGENTS = {
     run() {
       const p = path.join(HOME, ".codex/config.toml");
       let t = exists(p) ? fs.readFileSync(p, "utf8") : "";
-      t = removeTomlTable(t, "mcp_servers.agent-hub").trimEnd();
-      t += `\n\n[mcp_servers.agent-hub]\nurl = ${tomlStr(mcpUrl("codex"))}\nhttp_headers = ${tomlHeaders()}\n`;
+      t = removeTomlTable(t, "mcp_servers." + SERVER_NAME).trimEnd();
+      t += `\n\n[mcp_servers.${SERVER_NAME}]\nurl = ${tomlStr(mcpUrl("codex"))}\nhttp_headers = ${tomlHeaders()}\n`;
       let otelNote = "";
       if (OTEL) {
         if (/^\s*\[otel\]\s*$/m.test(t)) otelNote = "已有 [otel] 配置，未修改（要把成本回传 hub，把 exporter 指向 " + URL_ + "/v1/logs，protocol = \"json\"）";
@@ -105,19 +108,19 @@ const AGENTS = {
   },
   cursor: {
     label: "Cursor", detect: () => exists(path.join(HOME, ".cursor")) || which("cursor") || which("cursor-agent"),
-    run() { editJson(path.join(HOME, ".cursor/mcp.json"), (o) => { o.mcpServers = o.mcpServers || {}; o.mcpServers["agent-hub"] = { url: mcpUrl("cursor"), headers: auth() }; }, "Cursor MCP"); },
+    run() { editJson(path.join(HOME, ".cursor/mcp.json"), (o) => { o.mcpServers = o.mcpServers || {}; o.mcpServers[SERVER_NAME] = { url: mcpUrl("cursor"), headers: auth() }; }, "Cursor MCP"); },
   },
   vscode: {
     label: "VS Code（Copilot 智能体模式）", detect: () => exists(vscodeUserDir()),
-    run() { editJson(path.join(vscodeUserDir(), "mcp.json"), (o) => { o.servers = o.servers || {}; o.servers["agent-hub"] = { type: "http", url: mcpUrl("copilot"), headers: auth() }; }, "VS Code MCP"); },
+    run() { editJson(path.join(vscodeUserDir(), "mcp.json"), (o) => { o.servers = o.servers || {}; o.servers[SERVER_NAME] = { type: "http", url: mcpUrl("copilot"), headers: auth() }; }, "VS Code MCP"); },
   },
   copilot: {
     label: "Copilot CLI", detect: () => which("copilot") || exists(path.join(HOME, ".copilot")),
-    run() { editJson(path.join(HOME, ".copilot/mcp-config.json"), (o) => { o.mcpServers = o.mcpServers || {}; o.mcpServers["agent-hub"] = { type: "http", url: mcpUrl("copilot"), headers: auth(), tools: ["*"] }; }, "Copilot CLI MCP"); },
+    run() { editJson(path.join(HOME, ".copilot/mcp-config.json"), (o) => { o.mcpServers = o.mcpServers || {}; o.mcpServers[SERVER_NAME] = { type: "http", url: mcpUrl("copilot"), headers: auth(), tools: ["*"] }; }, "Copilot CLI MCP"); },
   },
   kiro: {
     label: "Kiro", detect: () => exists(path.join(HOME, ".kiro")) || which("kiro") || which("kiro-cli"),
-    run() { editJson(path.join(HOME, ".kiro/settings/mcp.json"), (o) => { o.mcpServers = o.mcpServers || {}; o.mcpServers["agent-hub"] = { url: mcpUrl("kiro"), headers: auth(), disabled: false, autoApprove: ["today", "list_tasks", "get_task", "get_project", "list_rules"] }; }, "Kiro MCP"); },
+    run() { editJson(path.join(HOME, ".kiro/settings/mcp.json"), (o) => { o.mcpServers = o.mcpServers || {}; o.mcpServers[SERVER_NAME] = { url: mcpUrl("kiro"), headers: auth(), disabled: false, autoApprove: ["today", "list_tasks", "get_task", "get_project", "list_rules"] }; }, "Kiro MCP"); },
   },
   "claude-desktop": {
     label: "Claude 桌面版 / Cowork（本机，经 mcp-remote 桥接）", detect: () => false,
@@ -126,12 +129,13 @@ const AGENTS = {
       const a = ["-y", "mcp-remote", mcpUrl("cowork"), "--header", "Authorization:${AGENT_HUB_AUTH}"];
       if (CF_ID && CF_SECRET) a.push("--header", "CF-Access-Client-Id:${CF_ACCESS_CLIENT_ID}", "--header", "CF-Access-Client-Secret:${CF_ACCESS_CLIENT_SECRET}");
       if (URL_.startsWith("http://") && !local) a.push("--allow-http");
-      editJson(claudeDesktopConfig(), (o) => { o.mcpServers = o.mcpServers || {}; o.mcpServers["agent-hub"] = { command: "npx", args: a, env: { AGENT_HUB_AUTH: "Bearer " + TOKEN, ...(CF_ID && CF_SECRET ? { CF_ACCESS_CLIENT_ID: CF_ID, CF_ACCESS_CLIENT_SECRET: CF_SECRET } : {}) } }; }, "Claude 桌面版 MCP");
+      editJson(claudeDesktopConfig(), (o) => { o.mcpServers = o.mcpServers || {}; o.mcpServers[SERVER_NAME] = { command: "npx", args: a, env: { AGENT_HUB_AUTH: "Bearer " + TOKEN, ...(CF_ID && CF_SECRET ? { CF_ACCESS_CLIENT_ID: CF_ID, CF_ACCESS_CLIENT_SECRET: CF_SECRET } : {}) } }; }, "Claude 桌面版 MCP");
     },
   },
 };
 
 async function main() {
+  if (!/^[A-Za-z0-9_-]+$/.test(SERVER_NAME) || (PROFILE && !/^[A-Za-z0-9_-]+$/.test(PROFILE))) { console.error("--name / --profile 只能包含字母、数字、下划线与连字符"); process.exit(1); }
   if (!!CF_ID !== !!CF_SECRET) { console.error("Access Client ID 与 Secret 必须同时提供"); process.exit(1); }
   if (!URL_ || URL_.includes("__HUB" + "_URL__")) { console.error("缺少 --url，例如 --url http://127.0.0.1:8787"); process.exit(1); }
   if (!TOKEN) {
@@ -141,17 +145,22 @@ async function main() {
   }
   log(`agent-hub：${URL_}${DRY ? "（dry-run，不会改任何文件）" : ""}`);
   try {
-    const r = await fetch(URL_ + "/api/capabilities", { headers: auth() });
+    const r = await fetch(URL_ + "/api/capabilities", { headers: auth(), redirect: "manual", signal: AbortSignal.timeout(15000) });
+    if (r.status >= 300 && r.status < 400) throw new Error("入口要求 Cloudflare Access 认证，请提供本机服务凭证");
     if (r.status === 401) { console.error("令牌不对（401）"); process.exit(1); }
     if (!r.ok) throw new Error("HTTP " + r.status);
+    if (!r.headers.get("content-type")?.includes("application/json")) throw new Error("响应不是 Hub JSON，可能是登录页或错误地址");
+    const capabilities = await r.json();
+    if (!capabilities.version || typeof capabilities.baseUrl !== "string") throw new Error("响应不是 Hub capabilities");
     log("✓ 连接与令牌正常");
   } catch (e) { console.error("✗ 连不上 hub：" + e.message + "。先确认 hub 已启动、地址可达"); process.exit(1); }
 
-  const envFile = path.join(HOME, ".config/agent-hub/env");
+  const envFile = path.join(HOME, ".config/agent-hub", PROFILE ? PROFILE + ".env" : "env");
   if ([URL_, TOKEN, CF_ID, CF_SECRET].some(value => /[\r\n]/.test(value))) { console.error("连接配置不能包含换行"); process.exit(1); }
   writeFile(envFile, `AGENT_HUB_URL=${URL_}\nAGENT_HUB_TOKEN=${TOKEN}\nCF_ACCESS_CLIENT_ID=${CF_ID}\nCF_ACCESS_CLIENT_SECRET=${CF_SECRET}\n`, 0o600);
   if (!DRY) try { fs.chmodSync(envFile, 0o600); } catch { /* Windows */ }
   done.push(["仓库脚本读取的连接配置", envFile]);
+  if (PROFILE) log(`  运行仓库脚本前设置 AGENT_HUB_CONFIG=${envFile}；本次未改默认 env 文件。`);
 
   const want = opt("agents", "");
   const list = want ? want.split(",").map((s) => s.trim()).filter(Boolean) : Object.keys(AGENTS).filter((k) => AGENTS[k].detect());
@@ -166,7 +175,7 @@ async function main() {
   log(`\n下一步：
   1. 重启已打开的 Agent（MCP 与遥测配置在启动时加载）
   2. 在工作台“项目”页下载接入包，运行 bash agent-kit-<项目>/install.sh <项目目录>
-  3. 让任意 Agent 调用 agent-hub 的 today 工具试试（例如在 Claude Code 里说“用 agent-hub 看看今天要处理什么”）
+  3. 让任意 Agent 调用 ${SERVER_NAME} 的 today 工具试试（例如“用 ${SERVER_NAME} 看看今天要处理什么”）
   配置文件改动前都有备份（*.bak-agent-hub-时间戳）。`);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

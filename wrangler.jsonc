@@ -23,7 +23,7 @@
     "ACCESS_ALLOWED_EMAILS": "hio250@163.com",
     "ACCESS_TEAM_DOMAIN": "steep-pond-6404.cloudflareaccess.com",
     "ACCESS_AUD": "a049a951794c5484ed385de14964e4732d6170423f8a2287b1ac64c70705a67e",
-    "ACCESS_SERVICE_IDS": "",
+    "ACCESS_SERVICE_IDS": "b0adc3f78cd3bc11cdb061576dea8675.access",
     "PUBLIC_URL": "https://geoverse-agent-hub.libra-liuyb.workers.dev",
     "OAUTH_ENABLED": "0",
     "HUB_STORE_PAYLOAD": "summary",

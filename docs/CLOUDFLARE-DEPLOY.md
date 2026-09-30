@@ -119,7 +119,7 @@ node kit/connect.mjs --url https://hub.example.com --agents codex,cursor,claude
 
 2026-09-30：原有 Linux 端到端 57 项通过；安全回归 9 组通过；Node OAuth 14 项通过；真实 workerd 集成 40 项通过（含另一次 OAuth 14 项）；Wrangler dry-run 打包与绑定类型生成通过。测试使用合成数据，不接触部署账户或原有 Docker 数据卷。会话退出和过期也会关闭已连接的 Cookie SSE 数据流。
 
-尚未进行实际 Cloudflare 发布、域名绑定、Access 账户策略验收或真实远程 Agent 接入。GitHub CI 仅验证，不自动部署。
+已在本账户完成 workers.dev 私人生产发布、Access OTP/机器策略验收，以及本机真实远程 MCP 接入和项目/任务登记。没有绑定自有域名；详情与当前版本见云端准备指南，日常操作见[远程管理指南](REMOTE-MANAGEMENT-GUIDE.md)。GitHub CI 仅验证，不自动部署。
 
 ## 官方参考
 
