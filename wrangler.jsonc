@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "geoverse-agent-hub",
+  "account_id": "4352e30845d3f1e76df79a75666ba6f8",
   "main": "src/cloudflare/worker.js",
   "compatibility_date": "2026-09-30",
   "compatibility_flags": ["nodejs_compat"],
@@ -20,7 +21,7 @@
   "vars": {
     "HUB_INSTANCE": "personal",
     "ACCESS_ALLOWED_EMAILS": "hio250@163.com",
-    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_TEAM_DOMAIN": "steep-pond-6404.cloudflareaccess.com",
     "ACCESS_AUD": "",
     "ACCESS_SERVICE_IDS": "",
     "PUBLIC_URL": "",

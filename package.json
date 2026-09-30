@@ -9,7 +9,11 @@
     "test": "bash test/e2e.sh",
     "dev:cloudflare": "wrangler dev",
     "build:cloudflare": "wrangler deploy --dry-run --outdir .cloudflare/dist",
-    "deploy:cloudflare": "wrangler deploy",
+    "preflight:cloudflare": "node scripts/cloudflare-preflight.mjs",
+    "secret:cloudflare": "node scripts/cloudflare-secret.mjs",
+    "bootstrap:cloudflare": "node scripts/cloudflare-preflight.mjs --bootstrap && wrangler deploy",
+    "deploy:cloudflare": "node scripts/cloudflare-preflight.mjs && wrangler deploy",
+    "test:preflight": "node --test test/cloudflare-preflight.test.mjs",
     "types:cloudflare": "wrangler types .cloudflare/worker-configuration.d.ts",
     "test:security": "node --test test/security.test.mjs",
     "test:cloudflare": "node test/cloudflare.mjs"

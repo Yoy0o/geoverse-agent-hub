@@ -1,5 +1,7 @@
 # Cloudflare Workers 私人部署
 
+当前账户的核对结果、无自有域名的 `workers.dev` 方案及首次发布顺序，见 [云端准备详细指南](CLOUDFLARE-CLOUD-PREPARATION.md)。该方案无需购买域名。
+
 ## 架构与默认保护
 
 浏览器 / Agent → Cloudflare Access → Worker（校验 JWT）→ 个人工作区 Durable Object → SQLite。
@@ -60,12 +62,15 @@ Wrangler 默认将本地 SQLite 保存在 `.wrangler/`，与现有 Docker 数据
 
 ```powershell
 npx wrangler login
+npx wrangler whoami
+npm run preflight:cloudflare
 npm run build:cloudflare
-npm run deploy:cloudflare
-npx wrangler secret put HUB_TOKEN
+npm run deploy:cloudflare -- --secrets-file .cloudflare/bootstrap-secrets.json
 ```
 
-首次 deploy 创建 Worker、静态资源与 SQLite Durable Object 命名空间；尚未添加 HUB_TOKEN 时，应用会返回 503。随后通过交互式 secret put 设置至少 24 字符的随机令牌，不将令牌写入命令参数或源码。已有 Worker 的更新会继续使用现有密钥和数据库。
+首次 deploy 创建 Worker、静态资源与 SQLite Durable Object 命名空间。当前 Wrangler 会检查 required Secret：新 Worker 需要通过 `--secrets-file` 一并提供 HUB_TOKEN，不能假设可以先 deploy 再 secret put。随机密钥文件的生成、保存和删除步骤见详细指南；密钥至少 24 字符。若先创建 Worker 再配置 Access，请使用指南里的 `bootstrap:cloudflare` 保持入口关闭。
+
+已有 Worker 的后续发布无需 secrets-file，可直接运行 `npm run deploy:cloudflare` 继承现有密钥和数据库；轮换密钥使用交互式 `npx wrangler secret put HUB_TOKEN`。
 
 `wrangler login` 需要浏览器登录 Cloudflare。可选的非交互部署使用账户的 API Token 环境变量；GitHub origin 或 Hub 访问令牌都不能代替 Cloudflare API Token。
 
