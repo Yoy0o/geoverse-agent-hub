@@ -2,9 +2,11 @@
 
 核对日期：2026-09-30。目标：单人使用的 Agent Hub；用户目前没有自有域名，采用 Workers + SQLite Durable Objects + Cloudflare Access，使用账户的 `workers.dev` 地址。
 
-首次创建已于 **2026-09-30 14:29（Asia/Shanghai）** 完成，入口保持关闭。Worker `geoverse-agent-hub` 当前版本为 `1cbb2778-9d81-43b3-8903-989497a956b5`，部署 ID 为 `a282f474-8951-4aef-80b0-a879b3ea0393`。Cloudflare API 已核对：`enabled=false`、`previews_enabled=false`、自定义域名列表为空，HUB_TOKEN 为 `secret_text`，AgentHub 命名空间 `d5fe8ce040764582972ad1604ba8a69a` 的 `use_sqlite=true`。预定公网地址返回 HTTP 404 / error code 1042。
+**已完成私人生产部署与本人登录验收。** 入口：[打开云端工作台](https://geoverse-agent-hub.libra-liuyb.workers.dev)。先用 `hio250@163.com` 完成 Access 邮箱验证码登录，再使用独立云端 HUB_TOKEN 登录 Hub；原本本地 Hub 的令牌不适用于云端。用户已选择保持云端空工作台，不导入本地数据。
 
-**第 6 节已执行完成，无需再次首次创建。下一步从第 7 节配置 OTP 和 Access 开始。** PUBLIC_URL / ACCESS_AUD 仍为空，未迁移私人数据；本机密钥文件仍保留，尚未确认已存入密码管理器，因此没有删除。
+当前生产版本于 **2026-09-30 15:40（Asia/Shanghai）** 发布，版本 ID `e96e592b-cdc4-4a37-9147-b4c04d9e3303`，部署 ID `891af6d3-5903-458f-9f16-d89d5d6a073c`。Cloudflare API 已核对 `enabled=true`、`previews_enabled=false`、自定义域名列表为空。PUBLIC_URL 与真实 ACCESS_AUD 已填入；第 6–8 节均已执行，后续更新直接运行 `npm run deploy:cloudflare`。本机密钥文件 `.cloudflare/bootstrap-secrets.json` 仍保留，需本人存入密码管理器后再删除，不提交 Git。
+
+首次创建历史：2026-09-30 14:29 先以关闭入口的版本 `1cbb2778-9d81-43b3-8903-989497a956b5` 创建 Worker，部署 ID `a282f474-8951-4aef-80b0-a879b3ea0393`。当时 `enabled=false`、`previews_enabled=false`，地址返回 404 / 1042；HUB_TOKEN 上传为 `secret_text`，SQLite DO 命名空间 `d5fe8ce040764582972ad1604ba8a69a` 的 `use_sqlite=true`。完成 Access 策略后才开放生产入口。
 
 ## 1. 当前已经确认的内容
 
@@ -17,16 +19,18 @@
 | 当前浏览器用户权限 | Super Administrator - All Privileges | 截图；不代表本机 CLI 已获授权 |
 | 团队域名 | `steep-pond-6404.cloudflareaccess.com` | 已通过登录态只读查询 Access organization 确认并预填 |
 | 自有域名 | 暂无 | 用户明确回复 |
-| 应用访问邮箱 | 暂按 `hio250@163.com` | 现有白名单；与 Git 提交邮箱相同，可独立于 Cloudflare 管理员邮箱 |
+| 应用访问邮箱 | 仅 `hio250@163.com` | Access Allow 与 Worker 白名单一致；用户已完成 OTP 登录 |
 | Wrangler 本机认证 | 已成功 OAuth 授权 | 实际运行 `npx wrangler login` 和 `whoami` |
 | Workers 套餐 | Workers Free，Current plan | 实时 Workers plans 页面 |
 | Workers 账户子域 | `libra-liuyb.workers.dev` | 实时 Workers & Pages 的 Account details |
 | 当日 Workers 请求 | `0 / 100,000` | 实时 Usage，数值只代表核对时刻 |
-| Access 应用/AUD | 应用列表为空，暂无本项目 AUD | 已通过登录态只读查询 Access apps |
-| 身份提供商 | 只有一个 type=`cloudflare`，未发现 `onetimepin` | 只读查询身份提供商列表；163 邮箱登录还需设置 |
+| Access 应用 | `e28041f6-bb96-49e1-a700-39a7adfeca17` | Worker 级 All traffic，目标 Worker ID `78b925638b10498c8397e857f5473563` |
+| Access AUD | `a049a951794c5484ed385de14964e4732d6170423f8a2287b1ac64c70705a67e` | 远程应用与本地配置一致 |
+| 身份提供商 | Personal email OTP，type=`onetimepin` | ID `3dee978b-874d-4ff7-9d03-76fe9bed67e0`；应用仅允许此提供商 |
+| Access 策略 | 仅本人邮箱，要求 OTP；会话 24h | 无 Everyone、Bypass 或 Service Auth；Worker 另行校验签名与身份 |
 | Durable Objects | 已创建 `geoverse-agent-hub_AgentHub`，SQLite 存储 | 首次创建后通过 Cloudflare API 核对 |
 
-截图中的管理员邮箱被截断，现已通过 Wrangler 核对完整管理员身份，本文不重复发布该管理邮箱。截图里“已连接身份提供商”的勾选不能证明能用 `hio250@163.com` 登录；实时查询也确认目前尚无 Access 应用，不能认为私人保护已经生效。
+截图中的管理员邮箱被截断，现已通过 Wrangler 核对完整管理员身份，本文不重复发布该管理邮箱。截图中的勾选本身不能证明私人保护有效；本次已实际创建 OTP 和 Access 应用，并完成匿名拦截及本人登录后的读写验收。
 
 本仓库 Git 操作邮箱仍是 `hio250@163.com`。GitHub 源码仓库目前为公开仓库；应用数据和密钥通过独立的云端身份控制保护，私人导出文件、`.env`、`.dev.vars`、`.cloudflare/` 和运行数据库不提交。
 
@@ -38,7 +42,7 @@
 https://geoverse-agent-hub.libra-liuyb.workers.dev
 ```
 
-已确认 Workers 账户子域是 `libra-liuyb`，与 Zero Trust 团队名不同。上面的完整地址是准备使用的入口，尚未实际发布。无需购买域名、添加 DNS zone、设置 Tunnel、安装 WARP 或让本地 Docker 持续开机。
+已确认 Workers 账户子域是 `libra-liuyb`，与 Zero Trust 团队名不同。上面的完整地址已发布且受 Access 保护。无需购买域名、添加 DNS zone、设置 Tunnel、安装 WARP 或让本地 Docker 持续开机。
 
 访问链路是：浏览器/Agent → Cloudflare Access → Worker 校验签名、AUD 与身份白名单 → Hub 身份验证 → 个人 Durable Object SQLite。静态页面也先经过 Worker。HTTP/SSE/MCP 使用现有实现。
 
@@ -93,14 +97,14 @@ npx wrangler whoami
 
 1. 核对 Workers 套餐与当前使用量，确认允许 SQLite Durable Objects。
 2. 已有账户子域 `libra-liuyb.workers.dev`，无需重新注册或改名。
-3. 本项目 Worker 已完成首次创建，`workers.dev` 仍关闭。
+3. 本项目 Worker 已完成首次创建与生产发布，`workers.dev` 已在 Access 保护下开放，预览入口关闭。
 4. 团队域名已确认，后续如果修改团队名，再同步 `ACCESS_TEAM_DOMAIN`。
 
 账户子域决定所有 Worker 的地址，选择后避免频繁改名。[官方 workers.dev 配置](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/)
 
 ## 6. 首次创建 Worker：保持入口关闭
 
-当前仓库的 `workers_dev=false`、`preview_urls=false`、没有 routes，`PUBLIC_URL` 和 `ACCESS_AUD` 为空。先保持这个状态创建 Worker，让后续控制台可以选择它进行保护。此阶段不要导入私人数据。
+**本账户已执行此步骤，不要重复 bootstrap。** 当前仓库保存的是已完成 Access 配置的生产状态。以下步骤用于复现新实例的首次创建：先设置 `workers_dev=false`、`preview_urls=false`、不配置 routes，将 `PUBLIC_URL` 和 `ACCESS_AUD` 留空，再创建 Worker，让后续控制台可以选择它进行保护。此阶段不要导入私人数据。
 
 ```powershell
 npm ci
@@ -135,7 +139,7 @@ Remove-Item -LiteralPath .cloudflare/bootstrap-secrets.json
 
 ## 7. 创建本人的 Access 保护
 
-实时身份提供商列表没有 `onetimepin`。如果继续使用 `hio250@163.com`，先在 Zero Trust → Integrations → Identity providers 添加 One-time PIN，并允许本项目使用它；实际验证能收到验证码并完成登录。[官方 OTP 配置](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/)
+本账户已经创建 Personal email OTP，并限制本应用只使用它，用户已完成验证码登录。新实例可在 Zero Trust → Integrations → Identity providers 添加 One-time PIN，并允许对应应用使用它；实际验证能收到验证码并完成登录。[官方 OTP 配置](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/)
 
 然后在主控制台 Workers & Pages → `geoverse-agent-hub` → Access：
 
@@ -177,7 +181,18 @@ npm run deploy:cloudflare
 
 生产 preflight 会拒绝空/占位 AUD、不匹配的 URL、预览入口、LOCAL_DEV、写入 vars 的密钥及未经 Worker 校验的静态资源。它只检查本地配置，不证明远程 Access 策略、Secret 或 Workers 套餐正确；这些由上面的控制台核对和下面的真实验收确认。既有 Worker 更新会继承已设置的 HUB_TOKEN。
 
-## 9. 私人访问验收后再迁移数据
+## 9. 私人访问验收与可选迁移
+
+本次实际验收结果：
+
+- 匿名访问 `/`、`/shim.js`、`/api/health`、`/api/export`、`/mcp` 均返回 302 到 Access 登录；携带真实 Hub Bearer 并伪造 Access 身份/JWT 的请求也未绕过入口。
+- 本人完成 OTP 后，云端 Hub 登录、健康检查、任务创建/读取/更新、导出均返回 200；SSE 建连并收到文档变更。
+- 私人响应为 `Cache-Control: private, no-store`；Hub Cookie 无法由网页 JavaScript 读取；缺少 CSRF 自定义头的写请求返回 403。
+- 再次发布后，测试任务及更新字段、Hub 会话仍可读取；随后删除唯一临时任务。最终任务、规则、项目、复盘全部为 0，未导入本地数据。
+- Hub 退出返回 200，随后数据请求返回 401，原 SSE 流已关闭；验收后已恢复本人登录。
+- 云端 Access 策略和全部入口配置已复核；没有另一个邮箱的实际拒绝登录测试，也未做高负载或长期额度验证。上线后的 CPU/用量需继续观察。
+
+用户选择**保持云端空工作台**。以下为以后需要迁移时的验收和恢复步骤，本次不执行迁移：
 
 1. 用未登录的无痕窗口访问入口：应先到 Access 登录或拒绝页，不能直接打开 Hub 静态页面。
 2. 同样测试 `/shim.js`、`/api/health`、`/api/export`、`/mcp`。Access 可返回登录重定向或拒绝状态；关键是没有取得私人内容，而非所有匿名请求必须固定 401。
@@ -210,9 +225,9 @@ node kit/connect.mjs --url https://geoverse-agent-hub.libra-liuyb.workers.dev --
 - 已通过实时控制台和 Wrangler 锁定正确 account_id，确认 Workers Free、真实账户子域、团队域名；准备时 Access 应用和 DO 命名空间为空，首次创建后已有 SQLite DO 命名空间。
 - 已提供无自有域名的 Workers + Access 发布顺序及密钥处理步骤。
 - 已增加 bootstrap/生产部署前配置检查，并接入 npm 发布命令和 CI。
-- 本机 Wrangler 已完成 OAuth 授权；配置仍保留关闭入口的状态，尚不存在的 AUD 保持空。
+- 本机 Wrangler 已完成 OAuth 授权；已创建 OTP 与 Worker 级 Access 应用，填入真实 AUD 和 PUBLIC_URL 后开放受保护入口，预览入口仍关闭。
 - 已在不提交的 `.cloudflare/bootstrap-secrets.json` 生成独立云端 Secret 文件，验证不会覆盖已有密钥；首次创建已将 HUB_TOKEN 上传为云端 Secret。本机副本仍需本人存入密码管理器。
-- 已按用户要求创建关闭入口的 Worker 及 SQLite DO 命名空间，未创建 Access 策略或开通付费订阅，未迁移私人数据。仍需配置 OTP/Access、取得 AUD、填写 PUBLIC_URL，才能开放入口并完成访问验收。
+- 已按用户要求先创建关闭入口的 Worker 及 SQLite DO 命名空间，再完成私人生产部署、读写/SSE/持久化/退出验收。未开通付费订阅，未迁移私人数据，临时任务已删除，云端保持空工作台。
 
 ## 12. 借鉴官方 Agent Setup 提示
 

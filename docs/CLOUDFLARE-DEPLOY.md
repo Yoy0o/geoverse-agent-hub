@@ -10,7 +10,7 @@ Worker 也在身份校验后提供 `public/` 静态资源。`run_worker_first: t
 
 此版本面向单用户，主 Hub 令牌仍拥有完整读写权限。机器身份可在 Access 和 `ACCESS_SERVICE_IDS` 中分别撤销；Hub 内部尚没有只读令牌或多用户角色。
 
-默认关闭 `workers.dev` 与预览 URL，没有自动发布工作流。缺少 Hub 密钥、HTTPS PUBLIC_URL、Access Team Domain、AUD 或本人白名单时返回 503；缺少或无效的 Access JWT 返回 401；不匹配白名单身份返回 403。任何情况下都不会因校验出错而放行。
+当前实例已在 Access 保护下开放 `workers.dev`，预览 URL 关闭，没有自动发布工作流。新实例首次创建应按详细指南先关闭入口，完成 Access 后再开放。缺少 Hub 密钥、HTTPS PUBLIC_URL、Access Team Domain、AUD 或本人白名单时返回 503；缺少或无效的 Access JWT 返回 401；不匹配白名单身份返回 403。任何情况下都不会因校验出错而放行。
 
 ## 本地开发
 
@@ -36,9 +36,10 @@ Wrangler 默认将本地 SQLite 保存在 `.wrangler/`，与现有 Docker 数据
 1. 在 Cloudflare 账户启用 Workers 与 Zero Trust，准备一个该账户管理的自定义域名，例如 `hub.example.com`。先在账户中核对 SQLite Durable Objects 的可用计划和当前额度。
 2. 创建 Access self-hosted 应用，覆盖整个 `hub.example.com`，不要只保护 `/api` 或预览环境。Allow 策略只包含本人的邮箱；示例默认 `hio250@163.com`，可使用邮箱 OTP 或绑定身份提供商。不要添加 Everyone 或 Bypass。
 3. 从 Zero Trust 配置取得团队域名，例如 `my-team.cloudflareaccess.com`；从 Access 应用取得 AUD（Application Audience）。
-4. 修改 `wrangler.jsonc` 的非秘密配置：
+4. 修改 `wrangler.jsonc` 的非秘密配置，使用自己账户的 `account_id`；采用自定义域名时关闭 `workers.dev`：
 
 ```jsonc
+"workers_dev": false,
 "routes": [{ "pattern": "hub.example.com", "custom_domain": true }],
 "vars": {
   "HUB_INSTANCE": "personal",
