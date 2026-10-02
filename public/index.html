@@ -71,7 +71,7 @@ main{padding-top:16px}
 /* layout */
 .grid2{display:grid;grid-template-columns:minmax(0,1fr);gap:14px}
 @media (min-width:900px){.grid2{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}}
-.stack{display:grid;gap:14px}
+.stack{display:grid;gap:14px;align-content:start}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:0}
 .panel h2{margin:0 0 10px;font-size:15px;font-weight:700;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 .panel h2 small{font-weight:400;font-size:12px;color:var(--muted)}
@@ -81,6 +81,7 @@ main{padding-top:16px}
 /* KPI */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .kpi{background:var(--surface);padding:12px 14px}
+@media (max-width:640px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi:last-child:nth-child(odd){grid-column:1/-1}}
 .kpi .l{font-size:12px;color:var(--muted)}
 .kpi .v{font-family:var(--mono);font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.3}
 .kpi .s{font-size:11px;color:var(--muted);font-family:var(--mono)}
@@ -205,12 +206,70 @@ details.more summary{cursor:pointer;font-size:14px;font-weight:500}
 .modal .box > footer{padding:12px 16px;border-top:1px solid var(--line)}
 .modal textarea{min-height:240px}
 .stream{white-space:pre-wrap;font-size:14px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;min-height:80px}
+/* hub identity & header chips */
+.hubtag{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:2px 9px 2px 7px;border-radius:999px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);white-space:nowrap}
+.hubtag svg{width:14px;height:14px}
+.hubtag.cloud{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.chipbtn{appearance:none;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--ink-2);cursor:pointer;white-space:nowrap;font-family:var(--mono)}
+.chipbtn:hover{border-color:var(--line-2)}
+.chipbtn i{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.chipbtn.ok i{background:var(--ok)} .chipbtn.warn i{background:var(--warn)} .chipbtn.bad i{background:var(--bad)}
+.chipbtn.bad{color:var(--bad);border-color:var(--bad)}
+.kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line-2);border-bottom-width:2px;border-radius:5px;padding:0 5px;background:var(--surface);color:var(--ink-2)}
+@media (max-width:640px){.brand span.sub{display:none}.bar{padding-block:12px 6px}.bar .hide-sm{display:none}}
+
+/* execution */
+.loc{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--ink-2);white-space:nowrap}
+.loc svg{width:14px;height:14px;flex:none}
+.loc.cloud{color:var(--accent)}
+.prog{display:block;height:6px;border-radius:999px;background:var(--surface-2);overflow:hidden;min-width:60px}
+.prog i{display:block;height:100%;background:var(--accent);border-radius:999px;transition:width .4s}
+.prog.ok i{background:var(--ok)} .prog.warn i{background:var(--warn)} .prog.bad i{background:var(--bad)}
+.prog.ind i{width:35%!important;animation:ind 1.6s ease-in-out infinite}
+@keyframes ind{0%{transform:translateX(-100%)}100%{transform:translateX(290%)}}
+.h-running,.h-claimed,.h-ready{background:var(--accent-soft);color:var(--accent)}
+.h-queued,.h-waiting{background:var(--surface-2);color:var(--ink-2)}
+.h-stalled,.h-blocked{background:var(--warn-soft);color:var(--warn)}
+.h-lost,.h-failed{background:var(--bad-soft);color:var(--bad)}
+.h-done{background:var(--ok-soft);color:var(--ok)}
+.h-cancelled,.h-superseded{background:var(--surface-2);color:var(--muted)}
+.cardexec{display:grid;gap:4px;padding-top:6px;border-top:1px dashed var(--line)}
+.cardexec .row1{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:12px;color:var(--muted);min-width:0}
+.cardexec .row1 .loc{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.cardexec .row1 .pill{flex:none;font-size:11px}
+.cardexec .step{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card.warm{border-color:var(--warn)}
+.runs{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.runrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.runrow.warm{border-color:var(--warn)} .runrow.hot{border-color:var(--bad)}
+.runrow .t{font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:none;border:0;padding:0;text-align:left;cursor:pointer;color:var(--ink)}
+.runrow .t:hover{color:var(--accent)}
+.runrow .m{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-size:12px;color:var(--muted)}
+.runrow .p{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;font-size:12px}
+.runrow .p .s{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.runners{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
+.runner{border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:6px;background:var(--bg)}
+.runner.off{opacity:.72}
+.runner .n{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:600}
+.runner .m{font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 8px}
+.execbox{border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:8px;background:var(--bg)}
+.execbox.warm{border-color:var(--warn);background:var(--warn-soft)}
+.execbox .top{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:13px}
+.dispatch{border:1px solid var(--accent);background:var(--accent-soft);border-radius:10px;padding:12px;display:grid;gap:10px}
+.attempts{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:12px}
+.attempts li{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;color:var(--muted)}
+.syncbox{display:grid;gap:10px}
+.syncbox .meta div{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.conflicts{list-style:none;margin:0;padding:0;display:grid;gap:6px;font-size:13px}
+.conflicts li{padding:8px 10px;border-radius:8px;background:var(--warn-soft)}
+.skel{height:14px;border-radius:6px;background:linear-gradient(90deg,var(--surface-2),var(--line),var(--surface-2));background-size:200% 100%;animation:skel 1.2s linear infinite}
+@keyframes skel{0%{background-position:200% 0}100%{background-position:-200% 0}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head><body>
 <header class="bar"><div class="wrap">
-  <div class="brand"><h1>Agent 工作台</h1><span>agent-hub · 多 Agent 任务 · 评审 · 规则沉淀</span></div>
-  <span class="btns"><span class="sync" id="sync"><i></i><span>连接中…</span></span><button class="btn ghost sm" data-act="logout" title="退出登录">退出</button></span>
+  <div class="brand"><h1>Agent 工作台</h1><span id="hubtag"></span><span class="sub">多 Agent 任务 · 执行 · 评审 · 规则沉淀</span></div>
+  <span class="btns"><span class="sync" id="sync" title="与这台 Hub 的实时连接"><i></i><span>连接中…</span></span><span id="syncchip"></span><button class="btn pri sm" data-act="new-task" title="新建任务（快捷键 N）">新建任务</button><button class="btn ghost sm" data-act="shortcuts" title="快捷键（?）" aria-label="快捷键">?</button><button class="btn ghost sm" data-act="logout" title="退出登录">退出</button></span>
 </div></header>
 <nav class="tabs" aria-label="视图"><div class="wrap" role="tablist" id="tabs"></div></nav>
 <div class="wrap"><div id="banner"></div><main id="view" aria-live="polite"></main></div>
@@ -230,7 +289,7 @@ const RISK_TIP = {L1:"机械型：依赖升级、lint 修复、配置、迁移",
 const REASONS = ["规格不清","上下文缺失","越界改动","验证不足","设计问题","代码质量","安全隐患","Agent 能力不足"];
 const TARGETS = ["AGENTS.md","CLAUDE.md",".cursor/rules","评审清单","验证脚本","任务单模板"];
 const DEFAULT_AGENTS = ["Claude Code","Cowork","Codex","Cursor","Copilot","Kiro","Gemini CLI"];
-const TABS = [["today","今日"],["board","看板"],["projects","项目"],["agents","接入"],["capture","录入"],["rules","规则库"],["retro","复盘"],["export","导出与设置"]];
+const TABS = [["today","今日"],["board","看板"],["exec","执行"],["projects","项目"],["agents","接入"],["capture","录入"],["rules","规则库"],["retro","复盘"],["export","同步与设置"]];
 const NEXT = {
   "待规格":[["待执行","规格就绪"]],
   "待执行":[["执行中","开始执行"]],
@@ -247,7 +306,8 @@ const S = {
   filter: {project: "", agent: "", q: "", closed: false},
   loaded: {tasks:false, rules:false, retros:false, config:false},
   cap: {db:null, downloads:null, sample:null},
-  hub: {caps:null, status:null, feed:[], activity:{}, online:true}
+  hub: {caps:null, status:null, feed:[], activity:{}, online:true},
+  exec: {runners:new Map(), runs:new Map(), loaded:false}, sync:null, syncPreview:null, syncBusy:"", dispatch:null
 };
 const AI = () => (S.hub.caps && S.hub.caps.llm && S.hub.caps.llm.provider==="anthropic") ? "Claude" : "AI";
 try { const t = localStorage.getItem("awb.tab"); if (t && TABS.some(x=>x[0]===t)) S.tab = t; } catch(e){}
@@ -356,7 +416,12 @@ function attention(){
   S.tasks.forEach(t=>{
     if (t.status==="需介入") items.push({t, lvl:"bad", pri:0, note:"需介入 · "+(ago(lastEntered(t,"需介入")||t.updatedAt)||"")});
     else if (t.status==="待评审"){ const w = Date.now()-new Date(lastEntered(t,"待评审")||t.updatedAt||t.createdAt); items.push({t, lvl:"warn", pri:1, wait:w, note:"待评审 · 已等待 "+dur(w)}); }
-    else if (t.status==="执行中" && num(t.budgetMin) && t.startedAt){ const run=(Date.now()-new Date(t.startedAt))/60000; if(run>num(t.budgetMin)) items.push({t, lvl:"acc", pri:2, note:"超出时长预算 · 已运行 "+dur(run*60000)+" / 预算 "+t.budgetMin+" 分"}); }
+    else {
+      const r = OPEN.includes(t.status) ? execOf(t) : null;
+      if (r && (r.health==="stalled" || r.health==="lost")) items.push({t, lvl: r.health==="lost" ? "bad" : "warn", pri:2, note:(r.health==="lost" ? "执行端离线，执行失联" : "执行停滞 · "+beat(r))+" · "+whereText(r)});
+      else if (r && (r.health==="waiting" || (r.health==="queued" && Date.now()-Date.parse(r.createdAt||r.at) > 30*60000))) items.push({t, lvl:"acc", pri:3, note:(r.mode==="handoff" ? "等待云端 Agent 接手" : "派发后还没有执行端领取")+" · "+ago(r.createdAt||r.at)});
+      else if (t.status==="执行中" && num(t.budgetMin) && t.startedAt){ const run=(Date.now()-new Date(t.startedAt))/60000; if(run>num(t.budgetMin)) items.push({t, lvl:"acc", pri:4, note:"超出时长预算 · 已运行 "+dur(run*60000)+" / 预算 "+t.budgetMin+" 分"}); }
+    }
   });
   return items.sort((a,b)=>a.pri-b.pri || (b.wait||0)-(a.wait||0));
 }
@@ -377,7 +442,9 @@ function withPreserved(root, preserve, fn){
   const a = document.activeElement; const act = a && root.contains(a) && a.id ? a.id : null;
   let sel = null; try { if (act && a.selectionStart!=null) sel = [a.selectionStart, a.selectionEnd]; } catch(e){}
   const scrollers = $$("[data-keep-scroll]", root).map(el=>[el.dataset.keepScroll, el.scrollTop, el.scrollLeft]);
+  const opened = $$("details", root).map(el=>el.open);
   fn();
+  const ds = $$("details", root); if (ds.length === opened.length) ds.forEach((el,i)=>{ el.open = opened[i]; });
   Object.entries(vals).forEach(([id,s]) => { const el = document.getElementById(id); if (!el || !root.contains(el)) return; if ("c" in s) el.checked = s.c; else if (el.value !== s.v) el.value = s.v; });
   scrollers.forEach(([k,t,l])=>{ const el=root.querySelector('[data-keep-scroll="'+k+'"]'); if(el){ el.scrollTop=t; el.scrollLeft=l; } });
   if (act) { const el = document.getElementById(act); if (el) { el.focus({preventScroll:true}); if (sel && el.setSelectionRange) try { el.setSelectionRange(sel[0], sel[1]); } catch(e){} } }
@@ -386,14 +453,20 @@ function renderTabs(){
   const need = S.tasks.filter(t=>t.status==="需介入"||t.status==="待评审").length;
   const pendingRules = S.rules.filter(r=>r.status==="待写入").length;
   $("#tabs").innerHTML = TABS.map(([k,l]) => {
-    const c = k==="today" && need ? '<span class="cnt">'+need+'</span>' : k==="rules" && pendingRules ? '<span class="cnt">'+pendingRules+'</span>' : "";
+    const c = k==="today" && need ? '<span class="cnt">'+need+'</span>' : k==="rules" && pendingRules ? '<span class="cnt">'+pendingRules+'</span>' : k==="exec" ? execCount() : "";
     return '<button class="tab" role="tab" id="tab-'+k+'" data-act="tab" data-k="'+k+'" aria-selected="'+(S.tab===k)+'">'+l+c+'</button>';
   }).join("");
 }
 function renderSync(){
   const el = $("#sync");
-  el.className = "sync " + (S.mode==="db" ? "on" : S.mode==="local" ? "off" : "");
-  el.lastElementChild.textContent = S.mode==="db" ? "已同步" : S.mode==="local" ? "本地模式" : "连接中…";
+  const on = S.mode==="db" && S.hub.online;
+  el.className = "sync " + (on ? "on" : S.mode==="loading" ? "" : "off");
+  el.lastElementChild.textContent = S.mode==="db" ? (S.hub.online ? "已连接" : "重连中…") : S.mode==="local" ? "未连接" : "连接中…";
+  renderHub();
+}
+function execCount(){
+  const act = activeRuns(); const bad = act.filter(hot).length + remoteRuns().filter(hot).length;
+  return bad ? '<span class="cnt">'+bad+'</span>' : act.length ? '<span class="cnt" style="background:var(--accent-soft);color:var(--accent)">'+act.length+'</span>' : "";
 }
 function renderBanner(){
   $("#banner").innerHTML = S.mode==="local" ? '<div class="banner">没有连接到 agent-hub：请登录后刷新页面。改动只保留在本次打开的页面里。</div>' : (!S.hub.online ? '<div class="banner">与 agent-hub 的实时连接中断，正在重连…</div>' : "");
@@ -439,11 +512,19 @@ function viewToday(){
   return '<div class="stack">'+
     '<div class="kpis">'+kp.map(k=>'<div class="kpi"><div class="l">'+k[0]+'</div><div class="v">'+k[1]+'</div><div class="s">'+esc(k[2])+'</div></div>').join("")+'</div>'+
     '<div class="grid2"><div class="panel"><h2>需要我处理 <small>'+(att.length+(pendingRules.length?1:0))+' 项</small></h2>'+attHtml+'</div>'+
-    '<div class="stack"><div class="panel"><h2>问题归因 <small>近 7 天</small></h2>'+reasonsHtml+'</div>'+
+    '<div class="stack">'+runningPanel()+'<div class="panel"><h2>问题归因 <small>近 7 天</small></h2>'+reasonsHtml+'</div>'+
     '<div class="panel"><h2>项目接入</h2>'+projHtml+'</div></div></div>'+
     '<div class="grid2"><div class="panel"><h2>Agent 对比 <small>近 30 天</small></h2>'+agHtml+'</div>'+
     '<div class="panel"><h2>最近 Agent 活动 <small>实时 · <a href="#" data-act="tab" data-k="agents">接入状态</a></small></h2>'+feedHtml(S.hub.feed.slice(0,12), true)+'</div></div>'+
   '</div>';
+}
+
+function runningPanel(){
+  const list = activeRuns().concat(remoteRuns());
+  const n = list.length;
+  return '<div class="panel"><h2>正在执行 <small>'+n+' 个 · <a href="#" data-act="tab" data-k="exec">执行页</a></small></h2>'+
+    (n ? '<ul class="runs">'+list.slice(0,5).map(r=>runRow(r, {noCancel:true})).join("")+'</ul>'+(n>5?'<div class="btns" style="margin-top:8px"><button class="btn ghost sm" data-act="tab" data-k="exec">查看全部 '+n+' 个</button></div>':'')
+       : '<div class="empty">没有进行中的执行。'+(S.exec.runners.size ? '' : '<br>登记一台执行端后，可以从这里派发任务到本机或云端执行。')+'</div>')+'</div>';
 }
 
 /* ---------- view: board ---------- */
@@ -469,12 +550,12 @@ function viewBoard(){
     '<p class="hint" style="margin-top:8px">“已合并”默认只显示近 14 天。点开卡片可推进状态、记录评审和交付回执。</p>';
 }
 function cardHtml(t){
-  const rw = (t.reworks||[]).length;
+  const rw = (t.reworks||[]).length; const ex = OPEN.includes(t.status) ? execOf(t) : null;
   const wait = t.status==="待评审" ? "等待 "+dur(Date.now()-new Date(lastEntered(t,"待评审")||t.updatedAt||t.createdAt)) : t.status==="执行中" && t.startedAt ? "已运行 "+dur(Date.now()-new Date(t.startedAt)) : ago(t.updatedAt||t.createdAt);
-  return '<button class="card'+(t.status==="需介入"?" hot":"")+'" data-act="open" data-id="'+esc(t.id)+'">'+
+  return '<button class="card'+(t.status==="需介入"||hot(ex)?" hot":warm(ex)?" warm":"")+'" data-act="open" data-id="'+esc(t.id)+'">'+
     '<span class="id">'+esc(t.id)+' '+sampleBadge(t)+'</span><span class="t">'+esc(t.title||"(未命名)")+'</span>'+
     '<span class="m">'+rkPill(t.risk)+'<span>'+esc(t.agent||"未指定")+'</span>'+(t.project?'<span>'+esc(t.project)+'</span>':'')+'</span>'+
-    '<span class="m"><span>'+esc(wait)+'</span>'+(num(t.cost)!=null?'<span class="mono">'+money(num(t.cost))+'</span>':'')+(rw?'<span class="pill st-待评审">退回 '+rw+'</span>':'')+'</span></button>';
+    '<span class="m"><span>'+esc(wait)+'</span>'+(num(t.cost)!=null?'<span class="mono">'+money(num(t.cost))+'</span>':'')+(rw?'<span class="pill st-待评审">退回 '+rw+'</span>':'')+'</span>'+cardExec(t)+'</button>';
 }
 /* ---------- receipt ---------- */
 const RECEIPT_TEMPLATE = [
@@ -668,7 +749,7 @@ function viewRetro(){
 const MCP_PROMPT = "请用 agent-hub 连接器（list_tasks 带 include_closed、get_task、list_rules）读取我的 Agent 工作台，然后通过 Obsidian MCP 把内容写进我的 vault 的「Agent工作台」文件夹：每个任务一篇笔记放在「任务/」，文件名用任务编号，属性用 YAML frontmatter（id、title、project、agent、risk、status、created、done、cost、minutes、rework、first_pass、reasons、pr、session）；规则放在「规则/」；每周复盘放在「复盘/」，用 [[任务编号]] 链接相关任务。已存在的笔记只更新 frontmatter 和「工作台同步」段落，不要覆盖我手写的内容。";
 function viewExport(){
   const samples = S.tasks.filter(t=>t.sample).length;
-  return '<div class="grid2"><div class="stack">'+
+  return '<div class="grid2"><div class="stack">'+syncPanel()+
     '<div class="panel"><h2>导出到 Obsidian</h2><p class="hint">生成一个 zip：每个任务、规则、复盘各一篇 Markdown 笔记（YAML 属性），外加两个 Bases 看板文件，解压到 vault 根目录即可使用。</p>'+
       '<div class="form"><label class="small"><input type="checkbox" id="x-all" checked> 包含已结束超过 30 天的任务</label>'+
       '<div class="btns">'+(S.cap.downloads?'<button class="btn pri" data-act="export-obsidian">下载 Obsidian 包（.zip）</button>':'<span class="small muted">当前环境不支持下载文件，请用下面的 MCP 方式同步。</span>')+'</div></div>'+
@@ -696,12 +777,17 @@ const SCHEMA_DOC = [
 "  lastCheck:{at, ok, verify[], outOfScope[], changed[], added, removed}   task.sh check / 结束前验证回传",
 "  review:{at, firstPass, reasons[], note}   合并时",
 "  dropReason, history:[{at,from,to}]",
+"  exec:{run, status, mode, location(local|cloud), runner, runnerName, host, agent, progress, step, note, heartbeatAt, attempts}   当前执行摘要，随多端同步",
 "  createdAt, updatedAt, startedAt, doneAt (ISO 时间), sample(示例)",
 "rules/<id>   text, target, scope(全局|项目名), status(待写入|已写入|已废弃),",
 "             sourceTask, hits, createdAt, writtenAt",
 "retros/<YYYY-Www>   notes, actions, updatedAt",
 "config/main  agents[], projects[{name, path, stage, stack, docs, verify[], invariants[], forbidden[], protect[], onboard{git,kit,hooks,verify,first}}]",
-"原因分类：" + REASONS.join("、")].join("\n");
+"原因分类：" + REASONS.join("、"),
+"",
+"执行：GET /api/exec（执行端 + 进行中 + 最近结束）· POST /api/tasks/<id>/dispatch {mode: exec|prepare|handoff, runner, agent}",
+"      POST /api/tasks/<id>/progress {progress, step} · POST /api/runs/<run>/cancel · /runner.mjs（执行端脚本）",
+"同步：GET /api/sync/status · POST /api/sync/run {dryRun} · 对端接口 /api/sync/info|changes|apply"].join("\n");
 /* ---------- drawer: task detail ---------- */
 function fld(id, f, label, val, type, ph){
   return '<label class="f"><span>'+label+'</span><input type="'+(type||"text")+'" id="'+id+'" data-f="'+f+'" value="'+esc(val==null?"":val)+'"'+(ph?' placeholder="'+esc(ph)+'"':'')+(type==="number"?' step="any" min="0"':'')+'></label>';
@@ -737,11 +823,12 @@ function drawerHtml(t){
   const acc = t.acceptance || [];
   const wait = t.status==="待评审" ? dur(Date.now()-new Date(lastEntered(t,"待评审")||t.updatedAt)) : "—";
   return '<div class="backdrop" data-act="close"></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="任务详情">'+
-  '<div class="dh"><div class="top"><span class="mono small muted">'+esc(t.id)+' '+sampleBadge(t)+'</span><button class="btn ghost" data-act="close" aria-label="关闭">关闭</button></div>'+
+  '<div class="dh"><div class="top"><span class="mono small muted">'+esc(t.id)+' '+sampleBadge(t)+'</span><button class="btn ghost" id="d-close" data-act="close" aria-label="关闭（Esc）">关闭</button></div>'+
     '<input type="text" class="title" id="d-title" data-f="title" value="'+esc(t.title||"")+'" aria-label="标题">'+
     '<div class="btns">'+stPill(t.status)+rkPill(t.risk)+nexts+'</div></div>'+
   '<div class="db" data-keep-scroll="drawer">'+
     (S.reviewMode ? reviewPanel(t) : "")+
+    execSection(t)+
     '<div class="sec"><div class="row c3">'+
       '<label class="f"><span>项目</span><select id="d-project" data-f="project">'+projectOptions(t.project||"")+'</select></label>'+
       '<label class="f"><span>Agent</span><select id="d-agent" data-f="agent">'+agentOptions(t.agent||"")+'</select></label>'+
@@ -949,13 +1036,53 @@ function newTaskDoc(o){
   return Object.assign({title:"", project:"", agent:"", risk:"L2", goal:"", acceptance:[], allow:"", deny:"", budgetMin:60, spec:"", branch:"", pr:"", session:"",
     cost:null, minutes:null, ciRounds:null, lines:null, reworks:[], history:[{at, from:"", to:st}], createdAt:at, updatedAt:at, startedAt: st==="执行中"?at:null, doneAt:null}, o, {status: st});
 }
+function focusDrawer(){ const b = $(".drawer [data-act=close]"); if (b) b.focus({preventScroll:true}); }
+function closeDrawer(){
+  const id = S.openId; S.openId = null; S.reviewMode = null; S.dispatch = null; render();
+  const back = id && document.querySelector('[data-act="open"][data-id="'+(window.CSS&&CSS.escape?CSS.escape(id):id)+'"]'); if (back) back.focus({preventScroll:true});
+}
 const A = {
-  tab(el){ S.tab = el.dataset.k; S.openId = null; S.reviewMode = null; try{ localStorage.setItem("awb.tab", S.tab); }catch(e){} if (S.tab==="agents") refreshStatus(); render(); window.scrollTo(0,0); },
-  open(el){ S.openId = el.dataset.id; S.reviewMode = null; S.reviewSel = []; loadActivity(S.openId); render(); },
+  tab(el){ S.tab = el.dataset.k; S.openId = null; S.reviewMode = null; S.dispatch = null; try{ localStorage.setItem("awb.tab", S.tab); }catch(e){} if (S.tab==="agents") refreshStatus(); if (S.tab==="exec") loadExec(); if (S.tab==="export") loadSync(); render(); window.scrollTo(0,0); },
+  open(el){ const was = S.openId; S.openId = el.dataset.id; S.reviewMode = null; S.reviewSel = []; S.dispatch = null; loadActivity(S.openId); loadTaskRuns(S.openId); render(); if (!was) focusDrawer(); },
+  "new-task"(){ S.tab = "capture"; S.openId = null; S.reviewMode = null; S.dispatch = null; try{ localStorage.setItem("awb.tab", S.tab); }catch(e){} render(); window.scrollTo(0,0); const el = $("#n-title"); if (el) el.focus(); },
+  shortcuts(){ showShortcuts(); },
+  "go-sync"(){ A.tab({dataset:{k:"export"}}); const el = $(".syncbox"); if (el) el.scrollIntoView({block:"start"}); },
+  "exec-refresh"(){ loadExec(); toast("已刷新"); },
+  "dispatch-open"(){
+    const t = getTask(S.openId); if (!t) return;
+    const fit = [...S.exec.runners.values()].filter(x=>!t.project || x.projects.includes(t.project));
+    S.dispatch = {task: t.id, mode: fit.length ? (fit.some(x=>x.mode==="exec" && runnerOnline(x)) ? "exec" : "prepare") : "handoff", runner: "", agent: ""};
+    render();
+  },
+  "dispatch-close"(){ S.dispatch = null; render(); },
+  async "dispatch-confirm"(el){
+    const d = S.dispatch; const t = getTask(S.openId); if (!d || !t) return;
+    el.disabled = true;
+    try {
+      const r = await hub.req("POST", "/api/tasks/"+encodeURIComponent(t.id)+"/dispatch", {mode: d.mode, runner: d.mode==="handoff" ? "" : d.runner, agent: d.agent, note: val("dp-note").trim(), force: checked("dp-force")});
+      onRun(r.run);
+      if (d.mode==="handoff"){ S.dispatch = Object.assign({}, d, {result: {prompt: r.prompt}}); render(); copyText(r.prompt, "开工提示词"); }
+      else { S.dispatch = null; render(); toast(r.run.runnerName ? "已派发给「"+r.run.runnerName+"」" : "已派发，等待执行端领取"); }
+    } catch(e){ el.disabled = false; toast(e && e.message && e.code!=="revoked" ? e.message : "派发失败，请重试"); }
+  },
+  "run-cancel"(el){ armed(el, async ()=>{ try { const r = await hub.req("POST", "/api/runs/"+encodeURIComponent(el.dataset.id)+"/cancel", {}); onRun(r.run); toast(r.run.status==="cancelled" ? "已取消" : "已请求取消，执行端下一次心跳时停止 Agent"); } catch(e){ toast(e.message||"取消失败"); } }, "确认取消"); },
+  "runner-rm"(el){ armed(el, async ()=>{ try { await hub.req("DELETE", "/api/runners/"+encodeURIComponent(el.dataset.id)); onRunner({id: el.dataset.id, deleted: true}); toast("已移除执行端"); } catch(e){ toast(e.message||"移除失败"); } }, "再点一次确认移除"); },
+  async "sync-run"(){
+    S.syncBusy = "run"; S.syncPreview = null; render();
+    try { const r = await hub.req("POST", "/api/sync/run", {}); toast("同步完成：拉取 "+r.pulled+" · 推送 "+r.pushed+(r.conflicts?" · 合并冲突 "+r.conflicts:"")); }
+    catch(e){ toast(e.message||"同步失败"); }
+    S.syncBusy = ""; loadSync();
+  },
+  async "sync-preview"(){
+    S.syncBusy = "preview"; render();
+    try { S.syncPreview = await hub.req("POST", "/api/sync/run", {dryRun: true}); } catch(e){ toast(e.message||"预览失败"); }
+    S.syncBusy = ""; render();
+  },
+  async "sync-clear"(){ try { await hub.req("DELETE", "/api/sync/conflicts"); } catch(e){} loadSync(); },
   logout(){ fetch("/api/logout", {method:"POST",headers:{"X-Requested-With":"agent-hub"}}).finally(()=>location.reload()); },
   "refresh-status"(){ refreshStatus(); toast("已刷新"); },
   "copy-el"(el){ const t = document.getElementById(el.dataset.target); if (t) copyText(t.textContent, "内容"); },
-  close(){ S.openId = null; S.reviewMode = null; render(); },
+  close(){ closeDrawer(); },
   move(el){
     const t = getTask(S.openId); if (!t) return; const to = el.dataset.to;
     if (to==="__merge"){ S.reviewMode="merge"; S.reviewSel=[]; render(); return; }
@@ -1048,6 +1175,9 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("change", e => {
   const el = e.target;
+  if (S.dispatch && el.name==="dp-mode"){ S.dispatch.mode = el.value; render(); return; }
+  if (S.dispatch && el.id==="dp-runner"){ S.dispatch.runner = el.value; S.dispatch.agent = ""; render(); return; }
+  if (S.dispatch && el.id==="dp-agent"){ S.dispatch.agent = el.value; return; }
   if (el.dataset.act==="filter"){ S.filter[el.dataset.k] = el.type==="checkbox" ? el.checked : el.value; render(); return; }
   if (el.dataset.act==="acc-toggle"){ const t = getTask(S.openId); if (!t) return; const acc = (t.acceptance||[]).map((a,i)=> i===+el.dataset.i ? Object.assign({}, a, {done: el.checked}) : a); patchTask(t.id, {acceptance: acc}); return; }
   if (el.dataset.act==="onboard"){ const i = +el.dataset.i; const ps = S.config.projects.map((p,j)=> j===i ? Object.assign({}, p, {onboard: Object.assign({}, p.onboard||{}, {[el.dataset.k]: el.checked})}) : p); saveConfig({projects: ps}); return; }
@@ -1059,7 +1189,15 @@ document.addEventListener("change", e => {
     if (t[f] !== v) patchTask(t.id, f==="cost" ? {cost: v, costManual: v!=null} : {[f]: v}); }
 });
 document.addEventListener("input", e => { const el = e.target; if (el.dataset.act==="filter" && el.type==="search"){ S.filter.q = el.value; render(); } });
-document.addEventListener("keydown", e => { if (e.key==="Escape"){ if (modalEl) closeModal(); else if (S.openId){ S.openId=null; S.reviewMode=null; render(); } } });
+document.addEventListener("keydown", e => {
+  if (e.key==="Escape"){ if (modalEl) closeModal(); else if (S.dispatch){ S.dispatch = null; render(); } else if (S.openId) closeDrawer(); return; }
+  const tg = e.target;
+  if (e.metaKey || e.ctrlKey || e.altKey || modalEl || (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName)))) return;
+  if (e.key==="n" || e.key==="N"){ e.preventDefault(); A["new-task"](); }
+  else if (e.key==="/"){ e.preventDefault(); if (S.tab!=="board") A.tab({dataset:{k:"board"}}); const q = $("#f-q"); if (q) q.focus(); }
+  else if (e.key==="?"){ e.preventDefault(); showShortcuts(); }
+  else if (/^[1-9]$/.test(e.key) && TABS[+e.key-1]){ e.preventDefault(); A.tab({dataset:{k:TABS[+e.key-1][0]}}); }
+});
 async function importJson(file){
   let data; try { data = JSON.parse(await file.text()); } catch(e){ toast("文件不是有效的 JSON"); return; }
   if (!data || data.app!=="agent-workbench"){ toast("这不是 Agent 工作台的备份文件"); return; }
@@ -1092,8 +1230,9 @@ const ONBOARD = [
 ];
 const DAILY = [
   ["建任务","在工作台“录入”页，或 task.sh new \"标题\" --allow 'src/**'"],
-  ["开工","bash scripts/agent/task.sh start <任务编号> <简述>（分支 + worktree + 任务单，状态变为执行中）"],
-  ["交给 Agent","task.sh run <编号> claude|codex|cursor|kiro|code，或在 worktree 里自己打开；会话开始时钩子注入任务单"],
+  ["开工","bash scripts/agent/task.sh start <任务编号> <简述>（分支 + worktree + 任务单，状态变为执行中）；或在任务详情里“派发执行”给登记的执行端"],
+  ["交给 Agent","task.sh run <编号> claude|codex|cursor|kiro|code，或在 worktree 里自己打开；云端会话里用 task.sh attach <编号> 接手"],
+  ["看进度","“执行”页实时显示在哪台机器 / 哪个云端会话执行、进度与心跳；超过阈值没有心跳会进入今日待办"],
   ["自动回传","Agent 结束时钩子跑统一验证、提取交付回执，任务进入“待评审”或“需介入”；成本经 OTel 汇总"],
   ["机器检查","bash scripts/agent/task.sh check <任务编号>（验证 + 越界检查，结果写入任务）"],
   ["人工评审","在工作台点“评审通过并合并”或“退回修改”，选原因；手机上也可以让 Claude 通过连接器评审"],
@@ -1161,10 +1300,10 @@ function viewProjects(){
 
 /* ---------- agent-hub：活动、接入 ---------- */
 function fmtTok(n){ n = n||0; return n>=1e6 ? (n/1e6).toFixed(1)+"M" : n>=1e3 ? Math.round(n/1e3)+"k" : String(n); }
-const AGENT_LABEL = {"claude-code":"Claude Code", codex:"Codex", cursor:"Cursor", copilot:"Copilot", kiro:"Kiro", cowork:"Cowork", "claude-ai":"Claude", gemini:"Gemini CLI", git:"git", "task-sh":"task.sh", human:"人工", mcp:"MCP"};
+const AGENT_LABEL = {"claude-code":"Claude Code", codex:"Codex", cursor:"Cursor", copilot:"Copilot", kiro:"Kiro", cowork:"Cowork", "claude-ai":"Claude", gemini:"Gemini CLI", git:"git", "task-sh":"task.sh", human:"人工", mcp:"MCP", runner:"执行端", sync:"同步"};
 const agentLabel = a => AGENT_LABEL[a] || a || "";
-const KIND_LABEL = {"session.start":"开始","session.end":"结束",edit:"修改",tool:"工具",stop:"一轮",response:"回复",receipt:"回执",deny:"拦截",check:"检查",commit:"提交",merge:"合并","task.start":"开工",mcp:"MCP",note:"记录",error:"出错",prompt:"输入","spec.task":"spec",subagent:"子任务",compact:"压缩"};
-function kindPill(k){ const cls = k==="deny"||k==="error" ? "st-需介入" : k==="receipt"||k==="merge" ? "st-已合并" : k==="check"||k==="task.start" ? "st-待评审" : k==="session.start" ? "st-执行中" : ""; return '<span class="pill '+cls+'">'+esc(KIND_LABEL[k]||k)+'</span>'; }
+const KIND_LABEL = {"session.start":"开始","session.end":"结束",edit:"修改",tool:"工具",stop:"一轮",response:"回复",receipt:"回执",deny:"拦截",check:"检查",commit:"提交",merge:"合并","task.start":"开工",mcp:"MCP",note:"记录",error:"出错",prompt:"输入","spec.task":"spec",subagent:"子任务",compact:"压缩",run:"执行",progress:"进度",sync:"同步"};
+function kindPill(k){ const cls = k==="deny"||k==="error" ? "st-需介入" : k==="receipt"||k==="merge" ? "st-已合并" : k==="check"||k==="task.start" ? "st-待评审" : k==="session.start"||k==="run"||k==="progress" ? "st-执行中" : ""; return '<span class="pill '+cls+'">'+esc(KIND_LABEL[k]||k)+'</span>'; }
 function feedHtml(list, withTask){
   return list.length ? '<ul class="feed">'+list.map(e=>'<li><span class="tm">'+esc(fmtDate(e.at))+'</span>'+kindPill(e.kind)+'<span class="sm" title="'+esc(e.summary)+'">'+esc(agentLabel(e.agent))+' · '+(withTask&&e.task?'<a href="#" data-act="open" data-id="'+esc(e.task)+'">'+esc(e.task)+'</a> · ':'')+esc(e.summary)+'</span></li>').join("")+'</ul>' : '<div class="empty">还没有活动。</div>';
 }
@@ -1236,6 +1375,7 @@ function viewAgents(){
       '<div class="panel"><h2>① 本机一次性接入 <small>每台电脑一次</small></h2><p class="hint">写入 ~/.config/agent-hub/env，把 hub 注册为已安装 Agent 的 MCP 服务器，并给 Claude Code、Codex 打开遥测（成本回传）。改动前自动备份；先加 <code>--dry-run</code> 看会改什么。</p>'+snippet("s-connect", connect)+'</div>'+
       '<div class="panel"><h2>② 项目接入 <small>每个仓库一次</small></h2><p class="hint">在“项目”页下载接入包并运行 install.sh：AGENTS.md、各 Agent 的钩子（Claude Code、Codex、Cursor、Copilot、Kiro）、统一验证、task.sh 和 git 钩子。</p><div class="btns"><button class="btn sm" data-act="tab" data-k="projects">去项目页</button></div></div>'+
       '<div class="panel"><h2>③ Claude 网页 / 手机 / Cowork</h2>'+claudeAi+'</div>'+
+      '<div class="panel"><h2>④ 执行端 <small>可选 · 远程派发</small></h2><p class="hint">在执行任务的电脑（或云端 VM）上运行 runner.mjs，就能从这里或手机把任务派发过去：自动建分支和 worktree，按需无人值守启动 Agent，执行情况实时回报。</p><div class="btns"><button class="btn sm" data-act="tab" data-k="exec">去执行页</button></div></div>'+
     '</div><div class="stack">'+
       '<div class="panel"><h2>手动配置 MCP <small>connect.mjs 已自动完成时可跳过</small></h2><p class="hint">MCP 地址：<code>'+esc(mcp)+'</code>，鉴权头 <code>Authorization: Bearer &lt;HUB_TOKEN&gt;</code>。URL 上的 <code>?agent=</code> 用来区分来源。</p>'+
         manual.map(([n,t],i)=>'<details class="more"'+(i?'':' open')+'><summary class="small">'+esc(n)+'</summary><div style="margin-top:8px">'+snippet("s-m"+i, t)+'</div></details>').join("")+'</div>'+
@@ -1243,8 +1383,244 @@ function viewAgents(){
     '</div></div></div>';
 }
 
+/* ---------- 执行管理：执行端、执行记录、派发 ---------- */
+const RUN_ACTIVE = ["queued","claimed","ready","running"];
+const RUN_LABEL = {queued:"排队中",claimed:"已领取",ready:"待启动",running:"执行中",blocked:"阻塞",done:"已交付",failed:"失败",cancelled:"已取消",lost:"失联",superseded:"已替代",stalled:"停滞",waiting:"等待执行端"};
+const MODE_LABEL = {exec:"自动执行",prepare:"准备工作区",handoff:"交给 Agent",manual:"手动开工"};
+const DISPATCH_MODES = [["exec","自动执行","执行端领取后建好工作区，无人值守启动 Agent"],["prepare","准备工作区","执行端建好分支和 worktree，由你启动 Agent"],["handoff","交给云端 Agent","生成开工提示词，粘贴到 Claude Code 网页版、Codex 云端或 Copilot"]];
+const ICON = {
+  cloud: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.6 13h7a3 3 0 0 0 .5-5.96A4.2 4.2 0 0 0 4 7.6 2.7 2.7 0 0 0 4.6 13z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+  local: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3" width="11" height="7.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 13h13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
+};
+const stallMs = () => ((S.hub.caps && S.hub.caps.exec && S.hub.caps.exec.stallMinutes) || 15) * 60000;
+const offlineMs = () => ((S.hub.caps && S.hub.caps.exec && S.hub.caps.exec.runnerOfflineSeconds) || 90) * 1000;
+const isActive = r => !!(r && RUN_ACTIVE.includes(r.status));
+function runnerOnline(r){ return !!(r && r.lastSeen && Date.now()-Date.parse(r.lastSeen) < offlineMs()); }
+// 健康度随时间变化，前端按心跳重新计算：stalled 停滞、lost 执行端离线、waiting 指定的执行端不在线
+function runHealth(run, live){
+  if (!run) return "";
+  if (!isActive(run)) return run.status;
+  const rn = live && run.runner ? S.exec.runners.get(run.runner) : null;
+  if (run.status==="queued") return live && run.runner && !runnerOnline(rn) ? "waiting" : "queued";
+  if (live && run.mode==="exec" && run.runner && !runnerOnline(rn)) return "lost";
+  const last = Date.parse(run.heartbeatAt||run.startedAt||run.claimedAt||run.createdAt||run.at)||0;
+  return Date.now()-last > stallMs() ? "stalled" : run.status;
+}
+function liveRun(id){ const r = S.exec.runs.get(id); if (!r) return null; const rn = r.runner ? S.exec.runners.get(r.runner) : null; return Object.assign({}, r, {live:true, runnerName: rn ? rn.name : r.runnerName||"", health: runHealth(r, true)}); }
+// 任务当前的执行：本 Hub 有实时记录就用它；经多端同步来的只有任务里的摘要
+function execOf(t){
+  const e = t && t.exec; if (!e || !e.run) return null;
+  const live = liveRun(e.run); if (live) return live;
+  const r = Object.assign({id:e.run, task:t.id, createdAt:e.at}, e, {live:false});
+  r.health = runHealth(r, false); return r;
+}
+const hot = r => !!r && ["stalled","lost","failed"].includes(r.health);
+const warm = r => !!r && ["stalled","waiting","blocked"].includes(r.health);
+const healthPill = r => '<span class="pill h-'+esc(r.health||r.status)+'">'+esc(RUN_LABEL[r.health]||r.health||"")+'</span>';
+function progBar(r){
+  const p = r.progress, h = r.health;
+  const cls = h==="stalled"||h==="blocked" ? " warn" : h==="lost"||h==="failed" ? " bad" : h==="done" ? " ok" : "";
+  const ind = p==null && ["running","claimed","ready"].includes(h);
+  const w = p==null ? (h==="done"?100:0) : p>0 ? Math.max(2,p) : 0;
+  return '<span class="prog'+cls+(ind?" ind":"")+'" role="progressbar" aria-label="进度" aria-valuemin="0" aria-valuemax="100"'+(p!=null?' aria-valuenow="'+p+'"':'')+'><i style="width:'+w+'%"></i></span>';
+}
+const whereText = r => (r.location==="cloud"?"云端":"本机")+(r.runnerName||r.host?" · "+(r.runnerName||r.host):"");
+function where(r){ const c = r.location==="cloud"; return '<span class="loc '+(c?"cloud":"local")+'">'+(c?ICON.cloud:ICON.local)+esc(whereText(r))+'</span>'; }
+function kindTag(k){ return '<span class="loc '+(k==="local"?"local":"cloud")+'">'+(k==="local"?ICON.local+"本机":ICON.cloud+(k==="ci"?"CI":"云端"))+'</span>'; }
+const beat = r => { if (r.status==="queued") return "派发于 "+ago(r.createdAt||r.at); const t = r.heartbeatAt||r.startedAt||r.createdAt||r.at; return t ? "心跳 "+ago(t) : ""; };
+function taskTitle(id){ const t = getTask(id); return t ? (t.title||"(未命名)") : id; }
+async function loadExec(){
+  if (!window.hub) return;
+  try {
+    const r = await hub.req("GET", "/api/exec?limit=60");
+    S.exec.runners = new Map(r.runners.map(x=>[x.id,x]));
+    const m = new Map(); r.recent.concat(r.active).forEach(x=>m.set(x.id,x));
+    S.exec.runs.forEach((x,id)=>{ if (!m.has(id) && x.task===S.openId) m.set(id,x); });
+    S.exec.runs = m; S.exec.loaded = true;
+  } catch(e){}
+  scheduleRender();
+}
+async function loadTaskRuns(id){
+  if (!window.hub) return;
+  try { (await hub.req("GET", "/api/runs?task="+encodeURIComponent(id)+"&limit=30")).forEach(r=>S.exec.runs.set(r.id, r)); if (S.openId===id) scheduleRender(); } catch(e){}
+}
+function onRun(run){
+  if (!run || !run.id) return;
+  S.exec.runs.set(run.id, run);
+  if (S.exec.runs.size > 400){ [...S.exec.runs.values()].filter(x=>!isActive(x)).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))).slice(0, S.exec.runs.size-300).forEach(x=>S.exec.runs.delete(x.id)); }
+  scheduleRender();
+}
+function onRunner(rn){ if (!rn || !rn.id) return; if (rn.deleted) S.exec.runners.delete(rn.id); else S.exec.runners.set(rn.id, Object.assign({}, S.exec.runners.get(rn.id)||{}, rn)); scheduleRender(); }
+function activeRuns(){ return [...S.exec.runs.values()].filter(isActive).map(r=>liveRun(r.id)).sort((a,b)=>(hot(b)-hot(a)) || String(b.heartbeatAt||b.createdAt).localeCompare(String(a.heartbeatAt||a.createdAt))); }
+// 只在其他 Hub 上执行、经同步看到摘要的任务
+function remoteRuns(){ return S.tasks.filter(t=>t.exec && isActive(t.exec) && OPEN.includes(t.status) && !S.exec.runs.has(t.exec.run)).map(execOf); }
+function runRow(r, opts){
+  opts = opts||{};
+  const can = r.live && isActive(r) && !opts.noCancel;
+  const text = !isActive(r) && r.note ? r.note : (r.step||"");
+  return '<li class="runrow'+(hot(r)?" hot":warm(r)?" warm":"")+'">'+
+    '<button class="t" data-act="open" data-id="'+esc(r.task)+'" title="'+esc(taskTitle(r.task))+'">'+esc(taskTitle(r.task))+'</button>'+
+    '<span class="btns">'+healthPill(r)+(can?'<button class="btn ghost sm" data-act="run-cancel" data-id="'+esc(r.id)+'" title="取消这次执行">取消</button>':'')+'</span>'+
+    '<span class="m">'+where(r)+(r.agent?'<span>'+esc(agentLabel(r.agent))+'</span>':'')+'<span>'+esc(MODE_LABEL[r.mode]||r.mode||"")+'</span><span class="mono">'+esc(r.task)+'</span>'+
+      (isActive(r)?'<span>'+esc(beat(r))+'</span>':(r.endedAt?'<span>结束于 '+esc(ago(r.endedAt))+'</span>':''))+(r.live?'':'<span class="pill tagx" title="由其他 Hub 管理，经多端同步看到">同步</span>')+'</span>'+
+    (text||r.progress!=null ? '<span class="p"><span class="s" title="'+esc(text)+'">'+esc(text)+'</span><span class="mono small">'+(r.progress!=null?r.progress+"%":"")+'</span></span>' : '')+
+    (isActive(r)||r.progress!=null ? '<span style="grid-column:1/-1">'+progBar(r)+'</span>' : '')+
+  '</li>';
+}
+function runnerCard(r){
+  const on = runnerOnline(r);
+  const busy = [...S.exec.runs.values()].filter(x=>x.runner===r.id && isActive(x)).length;
+  return '<div class="runner'+(on?"":" off")+'"><div class="n"><span><i class="dot '+(on?"on":"")+'"></i>'+esc(r.name)+'</span>'+kindTag(r.kind)+'</div>'+
+    '<div class="m"><span>'+(on?"在线":"离线 · "+esc(ago(r.lastSeen)))+'</span><span>'+(r.mode==="exec"?"可自动执行":"只准备工作区")+'</span><span>并发 '+esc(r.maxRuns||1)+'</span>'+(busy?'<span>进行中 '+busy+'</span>':'')+'</div>'+
+    (r.host||r.platform?'<div class="m mono"><span>'+esc(r.host||"")+(r.platform?" · "+esc(r.platform):"")+'</span></div>':'')+
+    '<div class="chips">'+((r.projects||[]).map(p=>'<span class="pill">'+esc(p)+'</span>').join("")||'<span class="small muted">没有登记项目</span>')+(r.agents||[]).map(a=>'<span class="pill tagx">'+esc(agentLabel(a))+'</span>').join("")+'</div>'+
+    '<div class="btns"><button class="btn ghost sm bad" data-act="runner-rm" data-id="'+esc(r.id)+'">移除</button></div></div>';
+}
+function runnerSetup(){
+  const base = (S.hub.caps && S.hub.caps.baseUrl) || location.origin;
+  const cloud = S.hub.caps && S.hub.caps.hub && S.hub.caps.hub.kind==="cloud";
+  const pf = cloud ? " --profile cloud" : "";
+  return "# 每台执行任务的电脑一次（先用 connect.mjs"+pf+" 保存连接配置）\n"+
+    (cloud ? "# 云端 Hub 受 Access 保护：直接用仓库里的 kit/runner.mjs，或带服务凭证下载\n" : "curl -fsS "+base+"/runner.mjs -o ~/.config/agent-hub/runner.mjs\n")+
+    "node "+(cloud?"kit/runner.mjs":"~/.config/agent-hub/runner.mjs")+" register"+pf+" --name \"我的工作站\" --project <项目名>=<仓库路径> --agents claude-code,codex\n"+
+    "# 想让它无人值守启动 Agent 再加 --exec\n"+
+    "node "+(cloud?"kit/runner.mjs":"~/.config/agent-hub/runner.mjs")+" start"+pf+"   # 常驻运行（tmux / 开机自启）";
+}
+function viewExec(){
+  if (!S.exec.loaded) return '<div class="stack"><div class="panel"><div class="skel" style="width:40%"></div><div class="skel" style="margin-top:10px"></div></div></div>';
+  const runners = [...S.exec.runners.values()].sort((a,b)=>(runnerOnline(b)-runnerOnline(a)) || String(b.lastSeen).localeCompare(String(a.lastSeen)));
+  const act = activeRuns(), remote = remoteRuns();
+  const recent = [...S.exec.runs.values()].filter(r=>!isActive(r)).sort((a,b)=>String(b.endedAt||b.createdAt).localeCompare(String(a.endedAt||a.createdAt))).slice(0,12).map(r=>liveRun(r.id));
+  const t0 = new Date(); t0.setHours(0,0,0,0);
+  const doneToday = [...S.exec.runs.values()].filter(r=>r.status==="done" && Date.parse(r.endedAt||0)>=t0.getTime()).length;
+  const online = runners.filter(runnerOnline).length;
+  const kp = [
+    ["执行端在线", online+" / "+runners.length, runners.length ? "超过 "+Math.round(offlineMs()/1000)+" 秒无心跳算离线" : "还没有登记执行端"],
+    ["执行中", act.filter(r=>["running","claimed","ready"].includes(r.health)).length + remote.length, remote.length ? "含其他 Hub "+remote.length+" 个" : "本 Hub 管理"],
+    ["排队", act.filter(r=>["queued","waiting"].includes(r.health)).length, "等待执行端或 Agent 接手"],
+    ["需要关注", act.filter(hot).length + remote.filter(hot).length, "停滞 · 失联"],
+    ["今日交付", doneToday, "提交了回执的执行"]
+  ];
+  const actHtml = (act.length||remote.length) ? '<ul class="runs">'+act.map(r=>runRow(r)).join("")+remote.map(r=>runRow(r)).join("")+'</ul>'
+    : '<div class="empty">没有进行中的执行。<br>在任务详情里点“派发执行”，或在本机用 <code>task.sh start</code> 开工、在云端会话里用 <code>task.sh attach</code> 接手。</div>';
+  return '<div class="stack">'+
+    '<div class="kpis">'+kp.map(k=>'<div class="kpi"><div class="l">'+k[0]+'</div><div class="v">'+k[1]+'</div><div class="s">'+esc(k[2])+'</div></div>').join("")+'</div>'+
+    '<div class="grid2"><div class="stack">'+
+      '<div class="panel"><h2>进行中的执行 <small>超过 '+Math.round(stallMs()/60000)+' 分钟没有心跳记为停滞</small></h2>'+actHtml+'</div>'+
+      '<div class="panel"><h2>最近结束 <small>'+recent.length+'</small></h2>'+(recent.length?'<ul class="runs">'+recent.map(r=>runRow(r)).join("")+'</ul>':'<div class="empty">—</div>')+'</div>'+
+    '</div><div class="stack">'+
+      '<div class="panel"><h2>执行端 <small><button class="btn ghost sm" data-act="exec-refresh">刷新</button></small></h2>'+
+        (runners.length?'<div class="runners">'+runners.map(runnerCard).join("")+'</div>':'<p class="hint">执行端是一台登记过的电脑（或云端 VM、CI 机器），会领取派发给它的任务：建分支和 worktree，按需无人值守启动 Agent，并持续回报心跳和进度。</p>')+'</div>'+
+      '<div class="panel"><h2>接入执行端</h2>'+snippet("s-runner", runnerSetup())+
+        '<details class="more" style="margin-top:12px"><summary class="small">在云端 Agent 上执行（Claude Code 网页版、Codex 云端、Copilot）</summary><div class="small" style="margin-top:8px;display:grid;gap:6px">'+
+          '<div>1. 云端环境里配置 <code>AGENT_HUB_URL</code>、<code>AGENT_HUB_TOKEN</code>（云端 Hub 再加 <code>CF_ACCESS_CLIENT_ID</code> / <code>CF_ACCESS_CLIENT_SECRET</code>）为环境变量或密钥，并允许访问 Hub 域名。</div>'+
+          '<div>2. 任务详情 → 派发执行 → 交给云端 Agent，把生成的提示词粘贴给云端 Agent。</div>'+
+          '<div>3. Agent 运行 <code>bash scripts/agent/task.sh attach &lt;任务编号&gt;</code> 接手：这里会显示“云端”执行，钩子事件就是心跳。</div></div></details></div>'+
+    '</div></div></div>';
+}
+const canDispatch = t => !["待评审","已合并","已放弃"].includes(t.status);
+function execSection(t){
+  const r = execOf(t); const d = S.dispatch && S.dispatch.task===t.id ? S.dispatch : null;
+  const hist = [...S.exec.runs.values()].filter(x=>x.task===t.id).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))).map(x=>liveRun(x.id));
+  let h = '<div class="sec"><h4>执行 <span class="muted small">'+(t.exec&&t.exec.attempts?"共 "+t.exec.attempts+" 次尝试":"还没有执行记录")+'</span></h4>';
+  if (r){
+    h += '<div class="execbox'+(warm(r)||hot(r)?" warm":"")+'"><div class="top">'+healthPill(r)+where(r)+(r.agent?'<span>'+esc(agentLabel(r.agent))+'</span>':'')+'<span class="muted">'+esc(MODE_LABEL[r.mode]||"")+'</span>'+(isActive(r)?'<span class="muted">'+esc(beat(r))+'</span>':'')+'</div>'+
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center">'+progBar(r)+'<span class="mono small">'+(r.progress!=null?r.progress+"%":"—")+'</span></div>'+
+      (r.step?'<div class="small">'+esc(r.step)+'</div>':'')+
+      (r.note?'<div class="small '+(["failed","lost"].includes(r.health)?"bad":"muted")+'">'+esc(r.note)+'</div>':'')+
+      (r.health==="stalled"?'<div class="small">超过 '+Math.round(stallMs()/60000)+' 分钟没有心跳：Agent 可能卡住、会话结束但没交回执，或那台机器已关机。可以重新派发，或回到那台机器继续。</div>':'')+
+      (r.health==="lost"?'<div class="small">执行端离线，它启动的 Agent 已失去联系。确认那台机器的情况后重新派发。</div>':'')+
+      (!r.live && isActive(r)?'<div class="small muted">这次执行由其他 Hub 管理（经多端同步看到的摘要）；取消或重新派发请到那个 Hub 上操作。</div>':'')+
+      (r.worktree?'<div class="small mono muted" style="word-break:break-all">'+esc(r.worktree)+'</div>':'')+
+    '</div>';
+  }
+  if (d) h += dispatchPanel(t, d, r);
+  else if (canDispatch(t) || (r && r.live && isActive(r))) h += '<div class="btns" style="margin-top:8px">'+(canDispatch(t)?'<button class="btn sm'+(r&&isActive(r)?"":" pri")+'" data-act="dispatch-open">'+(r&&isActive(r)?"重新派发":"派发执行")+'</button>':'')+(r&&r.live&&isActive(r)?'<button class="btn ghost sm" data-act="run-cancel" data-id="'+esc(r.id)+'">取消执行</button>':'')+'</div>';
+  if (hist.length > (r && hist[0] && hist[0].id===r.id ? 1 : 0)) h += '<details class="more" style="margin-top:10px;border:0;padding:0"><summary class="small">执行历史（'+hist.length+'）</summary><ul class="attempts" style="margin-top:6px">'+
+    hist.map(x=>'<li>'+healthPill(x)+where(x)+(x.agent?'<span>'+esc(agentLabel(x.agent))+'</span>':'')+'<span>'+esc(MODE_LABEL[x.mode]||"")+'</span><span class="mono">'+esc(fmtDate(x.createdAt))+'</span>'+(x.exitCode!=null?'<span class="mono">退出码 '+esc(x.exitCode)+'</span>':'')+(x.note?'<span>'+esc(x.note)+'</span>':'')+'</li>').join("")+'</ul></details>';
+  return h + '</div>';
+}
+function dispatchPanel(t, d, r){
+  if (d.result) return '<div class="dispatch"><strong>交给云端 Agent</strong><p class="small" style="margin:0">把下面这段发给云端 Agent（Claude Code 网页版、Codex 云端、Copilot 云端 Agent）。它运行 task.sh attach 之后，这里会显示“云端 · 执行中”。</p>'+
+    '<textarea id="dp-prompt" class="code" readonly style="min-height:150px">'+esc(d.result.prompt)+'</textarea><div class="btns"><button class="btn pri sm" data-act="copy-el" data-target="dp-prompt">复制提示词</button><button class="btn ghost sm" data-act="dispatch-close">完成</button></div></div>';
+  const all = [...S.exec.runners.values()];
+  const fit = all.filter(x=>!t.project || x.projects.includes(t.project));
+  const rn = d.runner ? S.exec.runners.get(d.runner) : null;
+  const agentKeys = [...new Set((rn ? rn.agents : fit.flatMap(x=>x.agents||[])).concat(d.mode==="handoff"?[]:[]))];
+  const modeSeg = '<div class="seg" role="radiogroup" aria-label="派发方式">'+DISPATCH_MODES.map(([k,l,tip])=>'<label title="'+esc(tip)+'"><input type="radio" name="dp-mode" value="'+k+'"'+(d.mode===k?" checked":"")+'><span style="font-family:var(--sans)">'+esc(l)+'</span></label>').join("")+'</div>';
+  const tip = (DISPATCH_MODES.find(x=>x[0]===d.mode)||[])[2]||"";
+  let body = "";
+  if (d.mode!=="handoff"){
+    const warn = !fit.length ? '还没有登记了项目「'+esc(t.project||"未指定")+'」的执行端：在执行任务的电脑上运行 runner.mjs register（见“执行”页）。派发后会一直排队。'
+      : rn && d.mode==="exec" && rn.mode!=="exec" ? '执行端「'+esc(rn.name)+'」只准备工作区；需要自动执行时，在那台机器上用 --exec 重新登记。'
+      : rn && !runnerOnline(rn) ? '执行端「'+esc(rn.name)+'」当前离线，上线后才会领取。' : "";
+    body = '<div class="row c2"><label class="f"><span>执行端</span><select id="dp-runner">'+opt("", d.runner, "任一登记了该项目的执行端")+fit.map(x=>opt(x.id, d.runner, x.name+(runnerOnline(x)?"":"（离线）")+(x.mode==="exec"?"":" · 只准备"))).join("")+'</select></label>'+
+      '<label class="f"><span>Agent</span><select id="dp-agent">'+opt("", d.agent, rn&&rn.agents[0] ? "默认（"+agentLabel(rn.agents[0])+"）" : "执行端默认")+agentKeys.map(a=>opt(a, d.agent, agentLabel(a))).join("")+'</select></label></div>'+
+      (warn?'<p class="small" style="margin:0;color:var(--warn)">'+warn+'</p>':'');
+  }
+  return '<div class="dispatch"><strong>派发执行</strong>'+modeSeg+'<p class="small muted" style="margin:0">'+esc(tip)+'</p>'+body+
+    '<label class="f"><span>给执行者的备注（可选）</span><input type="text" id="dp-note" placeholder="例如：先补测试再改实现"></label>'+
+    (r && isActive(r) ? '<label class="small"><input type="checkbox" id="dp-force"> 替换当前执行（'+esc(RUN_LABEL[r.health]||"")+' · '+esc(whereText(r))+'），它启动的 Agent 会被停止</label>' : '')+
+    '<div class="btns"><button class="btn pri sm" data-act="dispatch-confirm">'+(d.mode==="handoff"?"生成提示词":"派发")+'</button><button class="btn ghost sm" data-act="dispatch-close">取消</button></div></div>';
+}
+function cardExec(t){
+  if (!OPEN.includes(t.status)) return "";
+  const r = execOf(t); if (!r || (!isActive(r) && !["failed","lost","blocked"].includes(r.health))) return "";
+  return '<span class="cardexec"><span class="row1">'+where(r)+healthPill(r)+'</span>'+progBar(r)+(r.step||r.progress!=null?'<span class="row1"><span class="step" title="'+esc(r.step||"")+'">'+esc(r.step||"")+'</span><span class="mono">'+(r.progress!=null?r.progress+"%":"")+'</span></span>':'')+'</span>';
+}
+
+/* ---------- 多端同步 ---------- */
+async function loadSync(){
+  if (!window.hub) return;
+  try { S.sync = await hub.req("GET", "/api/sync/status"); } catch(e){}
+  scheduleRender();
+}
+const SYNC_MODE = {both:"双向同步", pull:"只拉取（本端为镜像）", push:"只推送（本端为准）"};
+function syncPanel(){
+  const sy = S.sync; const h = S.hub.caps && S.hub.caps.hub;
+  if (!sy) return '<div class="panel"><h2>多端同步</h2><div class="skel"></div></div>';
+  const head = '<h2>多端同步 <small>'+(h?esc(h.name)+" · "+(h.kind==="cloud"?"云端":"本地"):"")+'</small></h2>';
+  if (!sy.configured) return '<div class="panel syncbox">'+head+
+    '<p class="hint" style="margin:0">本 Hub 没有配置同步对端，任务只保存在这里。要让本地 Hub 和云端 Hub 保持一致（离线时用本地、出门用手机看云端），在<b>发起同步的一端</b>（通常是本地 Docker Hub 的 .env）设置下面几项后重启；对端无需配置。</p>'+
+    '<pre class="code">HUB_SYNC_URL=https://&lt;云端 Hub 地址&gt;\nHUB_SYNC_TOKEN=&lt;云端 Hub 的令牌&gt;\nHUB_SYNC_ACCESS_CLIENT_ID=&lt;Access 服务凭证 ID&gt;\nHUB_SYNC_ACCESS_CLIENT_SECRET=&lt;Access 服务凭证 Secret&gt;\nHUB_SYNC_INTERVAL=60        # 秒，0 = 只手动\nHUB_SYNC_MODE=both          # both / pull / push</pre>'+
+    '<p class="hint" style="margin:0">同步任务、规则、复盘和设置；执行摘要（在哪里执行、进度）随任务一起过去。执行端和执行明细留在各自连接的 Hub。</p></div>';
+  const l = sy.last || {}; const pv = S.syncPreview;
+  const lastTxt = !sy.last ? "还没有同步过" : l.ok ? fmtDate(l.at)+" · 拉取 "+l.pulled+" · 推送 "+l.pushed+(l.conflicts?" · 合并冲突 "+l.conflicts:"")+" · "+l.ms+" ms" : "失败（"+fmtDate(l.at)+"）";
+  const log = sy.conflictLog || [];
+  return '<div class="panel syncbox">'+head+
+    '<div class="meta"><div><span>对端</span>'+esc(sy.peer?sy.peer.name+(sy.peer.kind==="cloud"?"（云端）":"（本地）"):sy.url)+'</div><div><span>地址</span><span class="mono small" title="'+esc(sy.url)+'">'+esc(sy.url)+'</span></div><div><span>方式</span>'+esc(SYNC_MODE[sy.mode]||sy.mode)+'</div><div><span>自动同步</span>'+(sy.interval?"每 "+sy.interval+" 秒":"只手动")+'</div></div>'+
+    '<p class="small" style="margin:0"><span class="'+(sy.last&&!l.ok?"bad":"muted")+'">最近一次：'+esc(lastTxt)+'</span>'+(sy.last&&!l.ok?'<br><span class="bad">'+esc(l.error||"")+'</span>':'')+(sy.pending?'<br><span class="muted">'+sy.pending+' 个文档等待下一轮重试</span>':'')+'</p>'+
+    '<div class="btns"><button class="btn pri sm" data-act="sync-run"'+(S.syncBusy?" disabled":"")+'>'+(S.syncBusy==="run"?"同步中…":"立即同步")+'</button><button class="btn sm" data-act="sync-preview"'+(S.syncBusy?" disabled":"")+'>'+(S.syncBusy==="preview"?"计算中…":"预览")+'</button></div>'+
+    (pv?'<div class="small" style="padding:8px 10px;border-radius:8px;background:var(--bg);border:1px solid var(--line)">预览（未写入）：将拉取 <b>'+pv.pull+'</b> 个、推送 <b>'+pv.push+'</b> 个文档'+(pv.conflicts.length?'，<span class="bad">'+pv.conflicts.length+' 个两端都改过，会合并</span>':'，没有冲突')+'。</div>':'')+
+    (log.length?'<div><div class="small" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b>冲突记录（'+log.length+'）</b><button class="btn ghost sm" data-act="sync-clear">清除</button></div><ul class="conflicts">'+log.slice(0,10).map(c=>'<li><div>'+(c.coll==="tasks"&&getTask(c.id)?'<a href="#" data-act="open" data-id="'+esc(c.id)+'">'+esc(c.title||c.id)+'</a>':esc(c.title||(c.coll==="config"?"设置（项目与 Agent 列表）":c.coll+"/"+c.id)))+' <span class="muted mono small">'+esc(fmtDate(c.at))+'</span></div><div class="small muted">'+esc(c.note)+'</div></li>').join("")+'</ul></div>':'')+
+  '</div>';
+}
+function renderHub(){
+  const h = S.hub.caps && S.hub.caps.hub; const el = $("#hubtag");
+  if (h){
+    const c = h.kind==="cloud";
+    const html = '<span class="hubtag '+(c?"cloud":"local")+'" title="当前打开的是'+(c?"云端":"本地")+' Hub：'+esc(h.name)+'。本地与云端的数据靠多端同步保持一致。">'+(c?ICON.cloud:ICON.local)+esc(h.name)+'</span>';
+    if (el.innerHTML !== html) el.innerHTML = html;
+    document.title = "Agent 工作台 · "+h.name;
+  }
+  const sy = S.sync; const sc = $("#syncchip"); let html = "";
+  if (sy && sy.configured){
+    const l = sy.last; const bad = l && !l.ok; const cf = sy.conflicts || (sy.conflictLog||[]).length;
+    html = '<button class="chipbtn hide-sm '+(bad?"bad":cf?"warn":"ok")+'" data-act="go-sync" title="'+esc(bad ? "同步失败："+(l.error||"") : "与「"+(sy.peer&&sy.peer.name||sy.url)+"」"+(SYNC_MODE[sy.mode]||""))+'"><i></i>'+(bad?"同步失败":cf?"已同步 · 冲突 "+cf:"已同步 · "+(sy.lastOk?ago(sy.lastOk):"未开始"))+'</button>';
+  }
+  if (sc.innerHTML !== html) sc.innerHTML = html;
+}
+function showShortcuts(){
+  closeModal(); modalEl = document.createElement("div"); modalEl.className = "modal";
+  const rows = [["N","新建任务"],["/","搜索任务（看板）"],["1 – 9","切换页面"],["Esc","关闭详情 / 弹窗"],["?","显示这个列表"]];
+  modalEl.innerHTML = '<div class="box" role="dialog" aria-modal="true" aria-label="快捷键" style="width:min(380px,100%)"><header>快捷键</header><div><table><tbody>'+rows.map(([k,v])=>'<tr><td><span class="kbd">'+esc(k)+'</span></td><td>'+esc(v)+'</td></tr>').join("")+'</tbody></table></div><footer class="btns"><button class="btn ghost" data-act="modal-close">关闭</button></footer></div>';
+  document.body.appendChild(modalEl);
+  modalEl.addEventListener("click", e => { if (e.target === modalEl) closeModal(); });
+  $("[data-act=modal-close]", modalEl).focus();
+}
+
 /* ---------- boot ---------- */
-const VIEWS = {today: viewToday, board: viewBoard, projects: viewProjects, agents: viewAgents, capture: viewCapture, rules: viewRules, retro: viewRetro, export: viewExport};
+const VIEWS = {today: viewToday, board: viewBoard, exec: viewExec, projects: viewProjects, agents: viewAgents, capture: viewCapture, rules: viewRules, retro: viewRetro, export: viewExport};
 let raf = 0; function scheduleRender(){ if (raf) return; raf = requestAnimationFrame(()=>{ raf = 0; render(); }); }
 function subErr(e){ if (e && e.code==="revoked"){ S.mode="local"; } scheduleRender(); }
 async function init(){
@@ -1260,6 +1636,7 @@ async function init(){
   db.collection("retros").onSnapshot(s => { const o = {}; s.docs.forEach(d=>{ o[d.id] = Object.assign({}, d.data(), {id:d.id}); }); S.retros = o; S.loaded.retros = true; scheduleRender(); }, subErr);
   db.doc("config/main").onSnapshot(d => { if (d.exists) S.config = normalizeConfig(d.data()); S.loaded.config = true; scheduleRender(); }, subErr);
   try { S.hub.caps = await hub.caps(); } catch(e){}
+  renderHub(); loadExec(); loadSync();
   refreshStatus(); loadFeed();
   if (S.tab==="agents") refreshStatus();
   window.addEventListener("hub:event", e => {
@@ -1270,7 +1647,13 @@ async function init(){
     if (S.tab==="today" || S.tab==="agents" || (S.openId && S.openId===ev.task)) scheduleRender();
   });
   window.addEventListener("hub:online", e => { if (S.hub.online !== e.detail){ S.hub.online = e.detail; scheduleRender(); } });
+  window.addEventListener("hub:run", e => onRun(e.detail));
+  window.addEventListener("hub:runner", e => onRunner(e.detail));
+  window.addEventListener("hub:sync", () => loadSync());
+  window.addEventListener("hub:reconnect", () => { loadExec(); loadSync(); });
   setInterval(refreshStatus, 60000);
+  // 心跳、停滞、“几分钟前”都随时间变化：每 30 秒刷新一次（输入框内容和焦点会保留）
+  setInterval(() => { if (!document.hidden && !modalEl) scheduleRender(); }, 30000);
   render();
 }
 init();

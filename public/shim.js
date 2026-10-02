@@ -29,7 +29,7 @@
     const el = document.createElement("div");
     el.className = "modal";
     el.innerHTML = '<form class="box" style="grid-template-rows:auto auto auto" id="hub-login"><header>登录 agent-hub</header>' +
-      '<div><p class="hint">输入 HUB_TOKEN（本地运行 node src/cli.js token 查看；Cloudflare 使用部署时设置的密钥）。</p>' +
+      '<div><p class="hint">输入这台 Hub 的 HUB_TOKEN（本地 Hub：docker compose exec agent-hub node src/cli.js token；云端 Hub：部署时设置的密钥）。本地与云端的令牌不同。</p>' +
       '<input type="password" id="hub-token" autocomplete="current-password" placeholder="ah_…" style="width:100%"><p class="hint bad" id="hub-login-err" hidden></p></div>' +
       '<footer class="btns"><button class="btn pri" type="submit">登录</button></footer></form>';
     document.body.appendChild(el);
@@ -66,9 +66,12 @@
       notify(d.coll, d.id);
     });
     es.addEventListener("agent-event", (e) => { try { window.dispatchEvent(new CustomEvent("hub:event", { detail: JSON.parse(e.data) })); } catch (x) { /* 忽略 */ } });
+    // 执行记录、执行端、多端同步状态的实时推送
+    ["run", "runner", "sync"].forEach((type) => es.addEventListener(type, (e) => { try { window.dispatchEvent(new CustomEvent("hub:" + type, { detail: JSON.parse(e.data) })); } catch (x) { /* 忽略 */ } }));
     es.addEventListener("open", () => {
       window.dispatchEvent(new CustomEvent("hub:online", { detail: true }));
       if (opened++ === 0) return;
+      window.dispatchEvent(new CustomEvent("hub:reconnect"));
       // 断线重连：全量重新同步
       Object.keys(colls).forEach((n) => load(n, true).then(() => { notify(n); (colls[n] ? Array.from(colls[n].keys()) : []).forEach((id) => notify(n, id)); }).catch(() => {}));
     });
