@@ -31,9 +31,10 @@
 | 断网后 | 本地 Hub 正常；模型与 Git 远程功能取决于网络 | 无法管理云端数据 |
 | 源码与命令执行 | 仍在本机仓库/worktree | 也仍在本机仓库/worktree，不由 Hub 自动执行 |
 | 更新服务 | 重新构建、启动 Docker | 检查配置后发布 Worker |
-| 数据切换 | 不自动复制云端数据 | 不自动复制本地数据 |
+| 数据切换 | 配置 `HUB_SYNC_*` 后与云端双向同步 | 作为同步对端，无需配置 |
+| 执行端（runner.mjs） | 可以连本地 Hub | 推荐连云端 Hub，手机上也能派发 |
 
-选择一个 Hub 作为某项任务的管理来源。任务编号、状态、评审、规则属于该 Hub；相同项目名不意味着两边自动同步。
+两端数据默认独立。需要保持一致时，在本地 `.env` 设置 `HUB_SYNC_URL`、`HUB_SYNC_TOKEN`（云端令牌）、`HUB_SYNC_ACCESS_CLIENT_ID/SECRET`（本机 Access 服务凭证）后 `docker compose up -d`，本地 Hub 每 60 秒与云端同步任务、规则、复盘和设置。两边都已有数据时，第一次同步会合并成并集：先备份两端，再用 `docker compose exec agent-hub node src/cli.js sync --dry-run` 预览。细节见[执行管理与多端同步](EXECUTION-AND-SYNC.md)。网页标题栏的徽标显示当前打开的是哪个 Hub。
 
 ## 3. 启动、停止与网页使用
 
@@ -105,7 +106,14 @@ bash scripts/agent/task.sh start <返回的任务编号> feature --agent codex
 bash scripts/agent/task.sh check <任务编号>
 ```
 
-`start` 创建本地 Git 分支和独立 worktree，状态同步到所选 Hub；代码执行与验证仍在本机。评审通过后再由本人执行 `task.sh merge`，它会改变 Git 主分支并上报合并结果。
+`start` 创建本地 Git 分支和独立 worktree，并在所选 Hub 生成一条“本机 · 执行中”的执行记录；之后钩子上报就是心跳，网页“执行”页能看到进度和当前步骤。代码执行与验证仍在本机。评审通过后再由本人执行 `task.sh merge`，它会改变 Git 主分支并上报合并结果。
+
+希望从网页或手机把任务交给这台电脑时，常驻一个执行端（默认只准备工作区，加 `--exec` 才会无人值守启动 Agent）：
+
+```bash
+node kit/runner.mjs register --profile local --name "DIY-Liu 工作站" --project geoverse-agent-hub=D:/workspace/geoverse-agent-hub --agents codex
+node kit/runner.mjs start --profile local
+```
 
 ## 7. 备份与更新
 
@@ -121,7 +129,7 @@ docker compose exec agent-hub node src/cli.js stats
 
 更新前备份，随后执行 `docker compose up -d --build agent-hub`。本机当前容器仍是已有构建；本次只改接入配置与登记数据，没有重新构建它。
 
-不要用 `docker compose down -v` 排查一般连接问题，它会删除数据卷。需要迁移云端时，按[远程管理指南](REMOTE-MANAGEMENT-GUIDE.md)逐项核对 JSON；两端没有双向同步或冲突合并。
+不要用 `docker compose down -v` 排查一般连接问题，它会删除数据卷。需要与云端保持一致时用多端同步（见第 2 节），不必再手动搬运 JSON；同步前仍建议两端各导出一份 JSON 备份。
 
 ## 8. 常见问题
 

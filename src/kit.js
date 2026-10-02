@@ -22,6 +22,7 @@ export function agentsMd(p) {
     "- 任务单在 `specs/<任务编号>.md`（task.sh start 自动写入；会话开始时钩子也会注入）。能用 agent-hub MCP 时，可以用 `get_task` 读取最新任务单",
     "- 按任务单的验收标准和“允许修改”范围工作；需要改范围外的文件时先停下来说明",
     "- 需要人决定的问题：结束本轮，在回执里写 `status: blocked` 并说明",
+    "- 阶段性进展用 `bash scripts/agent/hub.sh progress <0-100> \"<当前步骤>\"` 汇报（能用 agent-hub MCP 时用 `report_progress`），工作台和手机上实时可见",
     "- 提交信息末尾带 `Task: <任务编号>`（git 钩子会自动补上）",
     "- 结束时：运行统一验证 → 输出交付回执 → 能用 agent-hub MCP 时调用 `submit_receipt` 提交同样内容", "");
   const rs = relevantRules(p.name); if (rs.length) { L.push("## 规则（来自工作台规则库）"); rs.forEach((r) => L.push("- " + r.text)); L.push(""); }
@@ -115,6 +116,14 @@ export function kitReadme(p, hubUrl) {
     "#   在工作台评审：通过并合并 / 退回修改（选原因）",
     "bash scripts/agent/task.sh merge <任务编号>          # 合并，hub 标记已合并",
     "bash scripts/agent/task.sh clean <任务编号>", "```", "",
+    "## 执行情况与远程派发", "```",
+    "bash scripts/agent/task.sh progress <任务编号> 40 \"实现导出接口\"   # 汇报进度（MCP：report_progress）",
+    "bash scripts/agent/task.sh status <任务编号>          # 在哪里执行、做到哪一步",
+    "bash scripts/agent/task.sh attach <任务编号>          # 云端会话（Claude Code 网页版、Codex 云端…）里接手任务",
+    "curl -fsS " + hubUrl + "/runner.mjs -o ~/.config/agent-hub/runner.mjs   # 执行端：常驻后可以从网页 / 手机派发任务到这台电脑",
+    "node ~/.config/agent-hub/runner.mjs register --name 工作站 --project " + p.name + "=<本项目路径> --agents claude-code,codex",
+    "node ~/.config/agent-hub/runner.mjs start", "```", "",
+    "执行位置自动识别（Claude Code 云端、Codespaces、CI 记为云端），也可以用 AGENT_HUB_LOCATION=local|cloud 指定。", "",
     "## 各 Agent 的接入方式", "| Agent | 规则 | 任务单注入 | 受保护路径拦截 | 结束前验证 | 回执回传 | 成本 |", "|---|---|---|---|---|---|---|",
     "| Claude Code | CLAUDE.md → @AGENTS.md | SessionStart 钩子 | PreToolUse 钩子 | Stop 钩子 | Stop 钩子 + MCP | OTel |",
     "| Codex | AGENTS.md | SessionStart 钩子 | PreToolUse 钩子 | Stop 钩子 | Stop 钩子 + MCP | OTel（token） |",

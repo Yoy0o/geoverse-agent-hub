@@ -31,6 +31,8 @@
                         claude.ai / Claude 手机端 / Cowork 自定义连接器（经 Cloudflare Tunnel）
 ```
 
+执行端（`runner.mjs`）和云端 Agent 会话也接到同一个 hub：前者领取派发、建 worktree、按需启动 Agent，后者用 `task.sh attach` 接手任务；本地 hub 还可以与云端 hub 双向同步。见 [执行管理与多端同步](EXECUTION-AND-SYNC.md)。
+
 任务与 Agent 会话的关联靠**任务编号**：task.sh 建的分支叫 `agent/<任务编号>-<简述>`，worktree 在 `<仓库>.worktrees/<任务编号>`。hub.sh 每次上报都带上当前分支，hub 据此把会话、事件、成本挂到任务上；OTel 数据按 `session.id` 匹配到同一个会话。
 
 ## 3. 选一种部署形态
@@ -224,6 +226,8 @@ Kiro 的钩子格式在 2026 年更新为 `.kiro/hooks/*.json`（`version: "v1"`
 - **事件保留**：默认 90 天（`EVENT_RETENTION_DAYS`）；任务、规则、复盘永久保留
 - **隐私**：钩子载荷默认只存工具名、文件路径、命令摘要（`HUB_STORE_PAYLOAD=summary`），不存代码内容和提示词；OTel 默认不记录提示词
 - **令牌轮换**：改 `.env` 的 `HUB_TOKEN` 后重启，各电脑重新跑 connect.mjs；网页登录态随之失效
+- **执行记录保留**：已结束的执行记录与事件同样保留 `EVENT_RETENTION_DAYS` 天；任务里的执行摘要永久保留
+- **多端同步**：`.env` 设置 `HUB_SYNC_URL`、`HUB_SYNC_TOKEN`（及 Access 服务凭证）后重启；`docker compose exec agent-hub node src/cli.js sync --dry-run` 预览，网页“同步与设置”查看状态与冲突记录
 
 ## 10. 排查
 
@@ -235,6 +239,8 @@ Kiro 的钩子格式在 2026 年更新为 `.kiro/hooks/*.json`（`version: "v1"`
 | 成本一直为空 | Claude Code：`~/.claude/settings.json` 的 env 是否生效（新开会话）；协议必须是 `http/json`；Codex 只有 token，需要 PRICE_TABLE |
 | Agent 变慢 | 会话开始最多等 6 秒、结束最多 4 秒，其余事件后台发送；`AGENT_HUB_DISABLE=1` 可临时关闭上报 |
 | 结束前验证太慢 | `AGENT_SKIP_VERIFY=1` 临时跳过；或把耗时的步骤从 verify.sh 挪到 task.sh check 时再跑 |
+| 任务一直“排队中”、执行“停滞” | 见 [执行管理与多端同步 · 排查](EXECUTION-AND-SYNC.md#9-排查) |
+| 同步失败 | 网页“同步与设置”里的错误信息；`HUB_SYNC_TOKEN` 是对端的令牌；云端对端需要 Access 服务凭证 |
 | claude.ai 添加连接器失败 | `PUBLIC_URL` 必须是 https 且与浏览器访问的地址一致；`curl https://hub.example.com/.well-known/oauth-protected-resource/mcp` 应返回 JSON |
 
 ## 11. 已知限制

@@ -214,7 +214,7 @@ export function taskBrief(t) {
     const r = t.reworks[t.reworks.length - 1];
     L.push("", "## 上次评审退回（请先处理）", "- 原因：" + (r.reasons || []).join("、"), r.note ? "- 说明：" + r.note : "");
   }
-  L.push("", "## 工作方式", "- 在当前分支和目录中工作，不要切换、合并或删除分支", "- 提交信息末尾带 `Task: " + t.id + "`（git 钩子会自动补）");
+  L.push("", "## 工作方式", "- 在当前分支和目录中工作，不要切换、合并或删除分支", "- 提交信息末尾带 `Task: " + t.id + "`（git 钩子会自动补）", "- 阶段性进展：`bash scripts/agent/hub.sh progress <0-100> \"<当前步骤>\"`，或 agent-hub MCP 的 report_progress");
   const pend = relevantRules(t.project).filter((r) => r.status === "待写入" || !(pj && (pj.onboard || {}).kit));
   if (pend.length) { L.push("", "## 额外规则（尚未写入规则文件）"); pend.forEach((r) => L.push("- " + r.text)); }
   L.push("", "## 完成后", "按 AGENTS.md 中的“交付回执”格式输出回执，task 填 " + t.id + "；能用 agent-hub MCP 时同时调用 submit_receipt。若没有该格式，使用：", "", RECEIPT_TEMPLATE.split("\n").slice(4).join("\n"));

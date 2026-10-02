@@ -121,6 +121,7 @@ function childEnv(run) {
   return Object.assign({}, process.env, {
     AGENT_HUB_URL: CONN.url, AGENT_HUB_TOKEN: CONN.token, CF_ACCESS_CLIENT_ID: CONN.cfId, CF_ACCESS_CLIENT_SECRET: CONN.cfSecret,
     AGENT_HUB_RUN: run.id, AGENT_HUB_RUNNER: CONF.id, AGENT_HUB_LOCATION: CONF.kind === "local" ? "local" : "cloud", AGENT_HUB_HOST: hostName(),
+    AGENT_HUB_AGENT: run.agent || "task-sh",
   });
 }
 const update = (id, body) => api("POST", `/api/runs/${encodeURIComponent(id)}/update?agent=runner`, body).catch((e) => log("! 回报失败：" + e.message));
