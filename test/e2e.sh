@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 端到端测试：启动 hub → 建项目 → 生成接入包装进临时仓库 → task.sh 全流程 →
-# 模拟 Claude Code / Codex / Cursor / Copilot / Kiro 的钩子载荷 → OTel → MCP → connect.mjs
+# 模拟 Claude Code / Codex / Cursor / Copilot / Kiro 的钩子载荷 → OTel → MCP → connect.mjs → 执行端派发 → 多端同步
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
@@ -8,6 +8,8 @@ PORT=${PORT:-8791}
 T=$(mktemp -d)
 export HUB_DATA_DIR="$T/data" HUB_TOKEN=e2e-token PORT
 export AGENT_HUB_URL="http://127.0.0.1:$PORT" AGENT_HUB_TOKEN=e2e-token AGENT_HUB_CONFIG="$T/none"
+# 测试本身可能跑在云端会话或 CI 里：固定执行位置，云端识别单独测试
+export AGENT_HUB_LOCATION=local AGENT_HUB_HOST=e2e-host AGENT_HUB_RUNNER_FILE="$T/runner.json"
 pass=0; fail=0
 ok(){ echo "  ✓ $1"; pass=$((pass+1)); }
 ko(){ echo "  ✗ $1"; fail=$((fail+1)); }
@@ -17,7 +19,9 @@ jget(){ node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const o
 
 node --disable-warning=ExperimentalWarning src/server.js > "$T/hub.log" 2>&1 &
 HUBPID=$!
-trap 'kill $HUBPID 2>/dev/null; rm -rf "$T"' EXIT
+HUB2PID=""
+# 调试：E2E_KEEP=1 保留临时目录（日志、仓库、数据库）
+trap 'kill $HUBPID $HUB2PID 2>/dev/null; if [ -n "${E2E_KEEP:-}" ]; then echo "保留测试目录：$T"; else rm -rf "$T"; fi' EXIT
 for i in $(seq 1 30); do curl -sf "$AGENT_HUB_URL/api/health" >/dev/null && break; sleep 0.2; done
 
 echo "== 1. 启动与导入 =="
@@ -171,6 +175,115 @@ check "Cursor / Kiro / Copilot CLI 的 mcp.json 已写入" 'grep -q "agent=curso
 check "改动前做了备份" 'ls "$FH/.codex/" | grep -q "bak-agent-hub"'
 env -u AGENT_HUB_CONFIG HOME="$FH" AGENT_HUB_URL= AGENT_HUB_TOKEN= bash "$REPO/scripts/agent/hub.sh" ping > "$T/ping.log" 2>&1
 check "hub.sh 能从 ~/.config/agent-hub/env 读取配置" 'grep -q "已连接" "$T/ping.log"'
+
+echo "== 9. 执行管理：执行记录、进度、执行端 =="
+cd "$REPO"
+ID3=$(api -X POST -d '{"title":"执行端自动执行","project":"demo","allow":"src/**","acceptance":["写入 src/c.js","验证通过"]}' "$AGENT_HUB_URL/api/tasks" | jget o.id)
+bash scripts/agent/task.sh start "$ID3" manual > /dev/null 2>&1
+WT3="$T/demo-app.worktrees/$ID3"
+check "task.sh start 生成执行记录（执行中 · 本机 · 主机名）" '[ "$(api $AGENT_HUB_URL/api/tasks/$ID3 | jget "o.exec.status+\"/\"+o.exec.location+\"/\"+o.exec.host")" = "running/local/e2e-host" ]'
+check "执行编号写入 .agent/run" '[ -s "$WT3/.agent/run" ]'
+RUN3=$(cat "$WT3/.agent/run" 2>/dev/null)
+(cd "$WT3" && printf '{"session_id":"s3","cwd":"%s","tool_name":"Edit","tool_input":{"file_path":"%s/src/c.js"}}' "$WT3" "$WT3" | bash scripts/agent/hub.sh report claude-code PostToolUse)
+sleep 0.5
+check "钩子事件（带执行编号）更新步骤与心跳" '[ "$(api $AGENT_HUB_URL/api/runs/$RUN3 | jget "o.step+\"/\"+o.session")" = "修改代码/s3" ]'
+(cd "$WT3" && bash scripts/agent/hub.sh progress 45 "实现导出接口" >/dev/null)
+check "hub.sh progress → 任务执行摘要 45% · 步骤" '[ "$(api $AGENT_HUB_URL/api/tasks/$ID3 | jget "o.exec.progress+\"/\"+o.exec.step")" = "45/实现导出接口" ]'
+check "task.sh status 显示执行情况" 'bash scripts/agent/task.sh status "$ID3" | grep -q "执行中 · 本机 · e2e-host"'
+curl -s "$AGENT_HUB_URL/runner.mjs" -o "$T/runner.mjs"
+cat > "$T/fake-agent.sh" <<'FAKE'
+#!/usr/bin/env bash
+# 假的 Agent：汇报进度、改文件并提交、输出交付回执
+id=$1
+bash scripts/agent/hub.sh progress 60 "fake 实现中" >/dev/null
+echo "c" > src/c.js && git add -A && git commit -qm "feat: c"
+printf '完成。\n\n```agent-receipt\ntask: %s\nstatus: done\nsummary: 执行端自动执行完成\nchanged:\n  - src/c.js\nverify:\n  - bash scripts/agent/verify.sh: pass\nscope: ok\nrisks: 无\n```\n' "$id"
+FAKE
+printf '#!/usr/bin/env bash\necho "什么也没做"\n' > "$T/lazy-agent.sh"
+node "$T/runner.mjs" register --name e2e-runner --project demo="$REPO" --agent-cmd fake='["bash","'"$T"'/fake-agent.sh","{task}"]' --agent-cmd lazy='["bash","'"$T"'/lazy-agent.sh"]' --exec > "$T/register.log" 2>&1; rc=$?
+check "runner.mjs register 登记执行端" '[ $rc -eq 0 ] && grep -q "已登记执行端「e2e-runner」" "$T/register.log"'; [ $rc -eq 0 ] || cat "$T/register.log"
+RID=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).id)' "$T/runner.json" 2>/dev/null)
+check "工作台看到执行端在线（项目、Agent、自动执行）" '[ "$(api $AGENT_HUB_URL/api/runners | jget "(r=>r.online+\"/\"+r.projects+\"/\"+r.agents+\"/\"+r.mode)(o.find(r=>r.id===\"$RID\"))")" = "true/demo/fake,lazy/exec" ]'
+check "已有进行中的执行时派发返回 409" '[ "$(curl -s -o /dev/null -w %{http_code} -H "Authorization: Bearer $HUB_TOKEN" -H "Content-Type: application/json" -d "{\"mode\":\"exec\",\"agent\":\"fake\"}" $AGENT_HUB_URL/api/tasks/$ID3/dispatch)" = "409" ]'
+R=$(api -X POST -d '{"mode":"exec","agent":"fake","force":true}' "$AGENT_HUB_URL/api/tasks/$ID3/dispatch")
+NRUN=$(printf '%s' "$R" | jget o.run.id)
+check "派发（替换当前执行）→ 排队中，附带交给云端 Agent 的提示词" '[ "$(printf "%s" "$R" | jget o.run.status)" = "queued" ] && printf "%s" "$R" | jget o.prompt | grep -q "task.sh attach $ID3"'
+check "原执行记录标记为已替代" '[ "$(api $AGENT_HUB_URL/api/runs/$RUN3 | jget o.status)" = "superseded" ]'
+node "$T/runner.mjs" once > "$T/runner.log" 2>&1; rc=$?
+check "runner.mjs once：领取 → 复用 worktree → 启动 Agent" '[ $rc -eq 0 ] && grep -q "已启动 fake" "$T/runner.log"'; [ $rc -eq 0 ] || cat "$T/runner.log"
+check "Agent 输出的回执由执行端兜底回传 → 待评审" '[ "$(api $AGENT_HUB_URL/api/tasks/$ID3 | jget "o.status+\"/\"+o.receipt.summary")" = "待评审/执行端自动执行完成" ]'
+check "执行记录：已交付 · 本机 · 该执行端 · 退出码 0" '[ "$(api $AGENT_HUB_URL/api/runs/$NRUN | jget "[o.status,o.location,o.runner,o.exitCode,o.progress].join(\"/\")")" = "done/local/$RID/0/100" ]'
+check "Agent 中途的进度汇报关联到同一执行" '[ "$(api "$AGENT_HUB_URL/api/tasks/$ID3/activity" | jget "o.events.some(e=>e.kind===\"progress\"&&e.summary.includes(\"fake 实现中\"))")" = "true" ]'
+check "任务记录了 2 次执行尝试" '[ "$(api $AGENT_HUB_URL/api/tasks/$ID3 | jget o.exec.attempts)" = "2" ]'
+# 准备模式：只建工作区，人来启动 Agent
+ID4=$(api -X POST -d '{"title":"准备模式","project":"demo","allow":"src/**"}' "$AGENT_HUB_URL/api/tasks" | jget o.id)
+api -X POST -d '{"mode":"prepare"}' "$AGENT_HUB_URL/api/tasks/$ID4/dispatch" >/dev/null
+node "$T/runner.mjs" once > "$T/runner2.log" 2>&1
+WT4="$T/demo-app.worktrees/$ID4"
+check "准备模式：执行端建好 worktree → 待启动" '[ -d "$WT4" ] && [ "$(api $AGENT_HUB_URL/api/tasks/$ID4 | jget "o.status+\"/\"+o.exec.status")" = "执行中/ready" ]'
+R=$(cd "$WT4" && printf '{"session_id":"s4","cwd":"%s","hook_event_name":"SessionStart","source":"startup"}' "$WT4" | bash scripts/agent/hub.sh report claude-code SessionStart)
+check "在工作区启动 Agent（会话开始钩子）→ 执行中，仍是同一执行" '[ "$(api $AGENT_HUB_URL/api/tasks/$ID4 | jget "o.exec.status+\"/\"+o.exec.attempts+\"/\"+o.exec.runner")" = "running/1/$RID" ]'
+# 停滞：执行摘要超过阈值没有心跳 → 今日待办
+api -X PATCH -d "{\"exec\":$(api $AGENT_HUB_URL/api/tasks/$ID4 | jget "Object.assign(o.exec,{heartbeatAt:new Date(Date.now()-3600e3).toISOString()})")}" "$AGENT_HUB_URL/api/docs/tasks/$ID4" >/dev/null
+check "执行停滞进入待办（today attention）" 'node "$ROOT/test/mcp-call.mjs" "$AGENT_HUB_URL" "$HUB_TOKEN" today "{}" | grep -q "执行停滞"'
+# 取消排队中的派发
+ID5=$(api -X POST -d '{"title":"取消派发","project":"demo"}' "$AGENT_HUB_URL/api/tasks" | jget o.id)
+R5=$(api -X POST -d "{\"mode\":\"exec\",\"agent\":\"fake\",\"runner\":\"$RID\"}" "$AGENT_HUB_URL/api/tasks/$ID5/dispatch" | jget o.run.id)
+check "取消排队中的派发 → 已取消" '[ "$(api -X POST $AGENT_HUB_URL/api/runs/$R5/cancel | jget o.run.status)" = "cancelled" ]'
+check "已取消的派发不会被领取" '[ "$(api -X POST $AGENT_HUB_URL/api/runners/$RID/claim | jget o.run)" = "null" ]'
+# Agent 退出却没有回执 → 失败、需介入
+api -X POST -d "{\"mode\":\"exec\",\"agent\":\"lazy\",\"runner\":\"$RID\"}" "$AGENT_HUB_URL/api/tasks/$ID5/dispatch" >/dev/null
+node "$T/runner.mjs" once > "$T/runner3.log" 2>&1
+check "Agent 退出但没有回执 → 执行失败、任务需介入" '[ "$(api $AGENT_HUB_URL/api/tasks/$ID5 | jget "o.status+\"/\"+o.exec.status+\"/\"+o.exec.note")" = "需介入/failed/Agent 已退出，但没有收到交付回执" ]'
+# 云端会话：不建 worktree，直接 attach；位置自动识别为云端
+ID6=$(api -X POST -d '{"title":"云端执行","project":"demo"}' "$AGENT_HUB_URL/api/tasks" | jget o.id)
+R=$(api -X POST -d '{"mode":"handoff"}' "$AGENT_HUB_URL/api/tasks/$ID6/dispatch")
+HRUN=$(printf '%s' "$R" | jget o.run.id)
+check "交给云端 Agent：派发为等待接手（云端）" '[ "$(printf "%s" "$R" | jget "o.run.status+\"/\"+o.run.location+\"/\"+o.run.mode")" = "queued/cloud/handoff" ]'
+check "交给云端 Agent 的派发不会被执行端领取" '[ "$(api -X POST $AGENT_HUB_URL/api/runners/$RID/claim | jget o.run)" = "null" ]'
+git clone -q "$REPO" "$T/cloud-clone" && cd "$T/cloud-clone" && git checkout -q -b claude/cloud-session
+env -u AGENT_HUB_LOCATION -u AGENT_HUB_HOST CLAUDE_CODE_REMOTE=true bash scripts/agent/task.sh attach "$ID6" > "$T/attach.log" 2>&1; rc=$?
+check "task.sh attach（云端会话）接手同一执行 → 执行中 · 云端" '[ $rc -eq 0 ] && [ "$(api $AGENT_HUB_URL/api/tasks/$ID6 | jget "[o.status,o.exec.run,o.exec.status,o.exec.location,o.exec.host].join(\"/\")")" = "执行中/$HRUN/running/cloud/Claude Code 云端" ]'; [ $rc -eq 0 ] || cat "$T/attach.log"
+check "attach 写入任务单与 .agent/task" '[ -f specs/$ID6.md ] && [ "$(cat .agent/task)" = "$ID6" ]'
+printf '{"session_id":"c6","cwd":"%s","tool_name":"Edit","tool_input":{"file_path":"%s/src/d.js"}}' "$T/cloud-clone" "$T/cloud-clone" | env -u AGENT_HUB_LOCATION CLAUDE_CODE_REMOTE=true bash scripts/agent/hub.sh report claude-code PostToolUse
+sleep 0.5
+check "云端会话的钩子事件按 .agent/task 关联任务" '[ "$(api $AGENT_HUB_URL/api/runs/$HRUN | jget "o.step+\"/\"+o.session")" = "修改代码/c6" ]'
+check "合并任务后进行中的执行自动收尾" '[ "$(api -X POST -d "{\"action\":\"drop\",\"dropReason\":\"需求取消\"}" $AGENT_HUB_URL/api/tasks/$ID6/review >/dev/null; api $AGENT_HUB_URL/api/runs/$HRUN | jget o.status)" = "cancelled" ]'
+cd "$ROOT"
+check "执行总览接口（执行端 + 进行中 + 最近结束）" '[ "$(api $AGENT_HUB_URL/api/exec | jget "o.runners.length>=1&&o.active.length>=1&&o.recent.length>=3")" = "true" ]'
+
+echo "== 10. 多端同步（本地 Hub ↔ 另一个 Hub）=="
+PORT2=$((PORT+1))
+HUB_DATA_DIR="$T/data2" HUB_TOKEN=e2e-token-2 PORT=$PORT2 HUB_NAME="e2e 本地" HUB_SYNC_URL="$AGENT_HUB_URL" HUB_SYNC_TOKEN=e2e-token HUB_SYNC_INTERVAL=0 \
+  node --disable-warning=ExperimentalWarning src/server.js > "$T/hub2.log" 2>&1 &
+HUB2PID=$!
+H2="http://127.0.0.1:$PORT2"
+for i in $(seq 1 30); do curl -sf "$H2/api/health" >/dev/null && break; sleep 0.2; done
+api2(){ curl -sS -H "Authorization: Bearer e2e-token-2" -H "Content-Type: application/json" "$@"; }
+N1=$(api "$AGENT_HUB_URL/api/tasks" | jget o.length)
+check "预览同步：不写入，列出要拉取的数量" '[ "$(api2 -X POST -d "{\"dryRun\":true}" $H2/api/sync/run | jget "o.pull>=$N1&&o.dryRun")" = "true" ] && [ "$(api2 $H2/api/tasks | jget "o.filter(t=>t.id===\"$ID3\").length")" = "0" ]'
+S=$(api2 -X POST -d '{}' "$H2/api/sync/run")
+check "首次同步：拉取对端全部任务" '[ "$(api2 $H2/api/tasks | jget o.length)" -ge "$N1" ] && [ "$(api2 $H2/api/tasks/$ID3 | jget o.receipt.summary)" = "执行端自动执行完成" ]'
+check "设置也同步过来（项目 demo）" '[ "$(api2 $H2/api/docs/config/main | jget "o.data.projects.some(p=>p.name===\"demo\")")" = "true" ]'
+check "执行摘要随任务同步（对端看得到进度与位置）" '[ "$(api2 $H2/api/tasks/$ID3 | jget "o.exec.status+\"/\"+o.exec.location")" = "done/local" ]'
+check "再同步一次没有重复传输" '[ "$(api2 -X POST -d "{}" $H2/api/sync/run | jget "o.pulled+o.pushed")" = "0" ]'
+L1=$(api2 -X POST -d '{"title":"在本地 Hub 新建","project":"demo"}' "$H2/api/tasks" | jget o.id)
+api2 -X POST -d '{}' "$H2/api/sync/run" >/dev/null
+check "本地新建的任务推送到对端" '[ "$(api $AGENT_HUB_URL/api/tasks/$L1 | jget o.title)" = "在本地 Hub 新建" ]'
+# 冲突：两端同时修改同一任务
+api -X PATCH -d '{"goal":"对端改的目标"}' "$AGENT_HUB_URL/api/docs/tasks/$L1" >/dev/null
+sleep 0.05
+api2 -X POST -d '{"to":"需介入"}' "$H2/api/tasks/$L1/transition" >/dev/null
+S=$(api2 -X POST -d '{}' "$H2/api/sync/run")
+check "两端都改过：合并并记录冲突" '[ "$(printf "%s" "$S" | jget o.conflicts)" = "1" ] && [ "$(api2 $H2/api/sync/status | jget "o.conflictLog[0].id")" = "$L1" ]'
+check "合并结果两端一致：状态取最后一次流转，状态历史不丢" '[ "$(api $AGENT_HUB_URL/api/tasks/$L1 | jget "o.status+\"/\"+o.history.length")" = "需介入/2" ] && [ "$(api2 $H2/api/tasks/$L1 | jget "o.status+\"/\"+o.history.length")" = "需介入/2" ]'
+api -X DELETE "$AGENT_HUB_URL/api/docs/tasks/$L1" >/dev/null
+api2 -X POST -d '{}' "$H2/api/sync/run" >/dev/null
+check "对端删除同步到本端" '[ "$(curl -s -o /dev/null -w %{http_code} -H "Authorization: Bearer e2e-token-2" $H2/api/tasks/$L1)" = "404" ]'
+check "同步状态：对端名称、最近成功时间" '[ "$(api2 $H2/api/sync/status | jget "!!o.lastOk&&o.peer.kind===\"local\"&&o.configured")" = "true" ]'
+check "能力接口返回 Hub 身份（名称 / 类型）" '[ "$(api2 $H2/api/capabilities | jget "o.hub.name+\"/\"+o.hub.kind")" = "e2e 本地/local" ]'
+HUB_DATA_DIR="$T/data3" HUB_SYNC_URL="$AGENT_HUB_URL" HUB_SYNC_TOKEN=wrong node --disable-warning=ExperimentalWarning src/cli.js sync > "$T/sync-wrong.log" 2>&1
+check "错误的对端令牌给出明确提示" 'grep -q "对端拒绝了令牌" "$T/sync-wrong.log"'; grep -q "对端拒绝了令牌" "$T/sync-wrong.log" || cat "$T/sync-wrong.log"
 
 echo
 echo "通过 $pass 项，失败 $fail 项"

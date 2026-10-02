@@ -9,7 +9,7 @@ import { runtime, current } from "./runtime.js";
 import { authorizeAccess, AccessError, localRequest } from "./access.js";
 
 const nodeHandler = httpServerHandler(createServer((req, res) => current().app(req, res)));
-const dynamicPath = /^(?:\/(?:api|hooks|v1|oauth|\.well-known)(?:\/|$)|\/(?:mcp|connect\.mjs|authorize|token|register|revoke)(?:\/|$))/;
+const dynamicPath = /^(?:\/(?:api|hooks|v1|oauth|\.well-known)(?:\/|$)|\/(?:mcp|connect\.mjs|runner\.mjs|authorize|token|register|revoke)(?:\/|$))/;
 const interval = 6 * 3600 * 1000;
 
 export class AgentHub extends DurableObject {
@@ -29,6 +29,7 @@ export class AgentHub extends DurableObject {
   async alarm() {
     runtime.run(this.runtime, () => {
       this.runtime.store.pruneEvents(this.runtime.config.eventRetentionDays);
+      this.runtime.store.pruneRuns(this.runtime.config.eventRetentionDays);
       this.runtime.store.kv.prune();
     });
     await this.ctx.storage.setAlarm(Date.now() + interval);

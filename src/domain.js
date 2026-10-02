@@ -1,6 +1,7 @@
 // 任务领域逻辑：与界面里的规则保持一致（状态流、回执解析、任务单生成、指标）
 import crypto from "node:crypto";
 import { getDoc, setDoc, updateDoc, listDocs } from "#hub/db";
+import { config } from "#hub/config";
 
 export const STATUSES = ["待规格", "待执行", "执行中", "需介入", "待评审", "已合并", "已放弃"];
 export const OPEN = ["待规格", "待执行", "执行中", "需介入", "待评审"];
@@ -239,14 +240,24 @@ export function metrics(tasks, s, e) {
   });
   return { created: created.length, finished: finished.length, merged: merged.length, dropped: dropped.length, firstPass: firstPass.length, cost: Math.round(cost * 100) / 100, reasons: Object.entries(reasons).sort((a, b) => b[1] - a[1]) };
 }
+// 执行摘要（task.exec）超过阈值没有心跳：Agent 可能卡住、会话已结束但没交付，或机器已关机
+export function stalled(t, now = Date.now()) {
+  const e = t.exec;
+  if (!e || !["claimed", "ready", "running"].includes(e.status) || !OPEN.includes(t.status)) return false;
+  const last = Date.parse(e.heartbeatAt || e.startedAt || e.at) || 0;
+  return now - last > config.runStallMinutes * 60000;
+}
+export const execWhere = (e) => (e ? (e.location === "cloud" ? "云端" : "本机") + (e.runnerName || e.host ? " · " + (e.runnerName || e.host) : "") : "");
 export function attention(tasks) {
   const items = [];
   const now = Date.now();
   tasks.forEach((t) => {
     if (t.status === "需介入") items.push({ id: t.id, title: t.title, level: "需介入", since: lastEntered(t, "需介入") || t.updatedAt, agent: t.agent, project: t.project });
     else if (t.status === "待评审") items.push({ id: t.id, title: t.title, level: "待评审", since: lastEntered(t, "待评审") || t.updatedAt, waitMin: Math.round((now - new Date(lastEntered(t, "待评审") || t.updatedAt || t.createdAt)) / 60000), agent: t.agent, project: t.project });
+    else if (stalled(t, now)) items.push({ id: t.id, title: t.title, level: "执行停滞", since: t.exec.heartbeatAt || t.exec.at, idleMin: Math.round((now - Date.parse(t.exec.heartbeatAt || t.exec.at)) / 60000), where: execWhere(t.exec), agent: t.agent, project: t.project });
+    else if (t.exec && t.exec.status === "queued" && OPEN.includes(t.status) && now - Date.parse(t.exec.at || t.updatedAt) > 30 * 60000) items.push({ id: t.id, title: t.title, level: "派发未领取", since: t.exec.at, agent: t.agent, project: t.project });
     else if (t.status === "执行中" && num(t.budgetMin) && t.startedAt) { const run = (now - new Date(t.startedAt)) / 60000; if (run > num(t.budgetMin)) items.push({ id: t.id, title: t.title, level: "超出时长预算", runMin: Math.round(run), budgetMin: t.budgetMin, agent: t.agent, project: t.project }); }
   });
-  const order = { "需介入": 0, "待评审": 1, "超出时长预算": 2 };
+  const order = { "需介入": 0, "待评审": 1, "执行停滞": 2, "派发未领取": 3, "超出时长预算": 4 };
   return items.sort((a, b) => order[a.level] - order[b.level] || (b.waitMin || 0) - (a.waitMin || 0));
 }

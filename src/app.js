@@ -9,6 +9,7 @@ import { apiRoutes } from "./api.js";
 import { hookRoutes } from "./hooks.js";
 import { mcpRoutes } from "./mcp.js";
 import { DEFAULT_AGENTS } from "./domain.js";
+import { wireExec } from "./exec.js";
 
 
 export async function createApp({ serveStatic = true, trustProxy = 0 } = {}) {
@@ -23,6 +24,8 @@ export async function createApp({ serveStatic = true, trustProxy = 0 } = {}) {
 
   // 初次启动：写入默认配置
   if (!getDoc("config", "main")) setDoc("config", "main", { agents: DEFAULT_AGENTS.slice(), projects: [] }, "hub");
+  // 任务文档的变化（网页、MCP、钩子、对端同步）→ 收尾对应的执行记录
+  wireExec();
 
   let oauthProvider = null;
   if (config.oauth) {
@@ -54,7 +57,8 @@ export async function createApp({ serveStatic = true, trustProxy = 0 } = {}) {
   app.use((err, req, res, next) => {
     console.error("[error]", err && err.stack || err);
     if (res.headersSent) return next(err);
-    res.status(err.status || 500).json({ error: err.type === "entity.too.large" ? "payload_too_large" : "internal_error" });
+    const status = err.status || err.statusCode || 500;
+    res.status(status).json({ error: err.type === "entity.too.large" ? "payload_too_large" : err.type === "entity.parse.failed" ? "bad_json" : status < 500 && err.expose ? err.message : "internal_error" });
   });
 
 

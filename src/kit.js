@@ -171,3 +171,6 @@ export async function kitZip(p, hubUrl) {
 export function connectScript(hubUrl) {
   return tpl("connect.mjs").replace(/__HUB_URL__/g, () => hubUrl);
 }
+export function runnerScript(hubUrl) {
+  return tpl("runner.mjs").replace(/__HUB_URL__/g, () => hubUrl);
+}

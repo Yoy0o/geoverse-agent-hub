@@ -5,13 +5,22 @@ import { ingest, sessionStartResponse, kindOf } from "./ingest.js";
 import { readBody, handleLogs, handleMetrics } from "./otlp.js";
 
 function b64(v) { try { return v ? Buffer.from(String(v), "base64").toString("utf8") : ""; } catch { return ""; } }
-function meta(req) {
+const safe = (v, n = 120) => String(v || "").replace(/[^\w.@:+\-\u4e00-\u9fff ]/g, "").slice(0, n);
+// 执行位置：hub.sh 从 .agent/run、runner.json 和环境变量（云端会话、Codespaces、CI）推断后放在请求头里
+export function execMeta(req) {
+  const location = String(req.get("x-hub-location") || req.query.location || "").toLowerCase();
   return {
+    run: safe(req.get("x-hub-run") || req.query.run, 64), runner: safe(req.get("x-hub-runner") || req.query.runner, 64),
+    location: location === "cloud" || location === "local" ? location : "", host: safe(b64(req.get("x-hub-host")) || req.query.host),
+  };
+}
+function meta(req) {
+  return Object.assign({
     task: String(req.get("x-hub-task") || req.query.task || ""),
     branch: String(req.get("x-hub-branch") || req.query.branch || ""),
     repo: b64(req.get("x-hub-repo")) || String(req.query.repo || ""),
     cwd: String(req.query.cwd || ""),
-  };
+  }, execMeta(req));
 }
 const agentKey = (s) => String(s || "unknown").toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 40) || "unknown";
 

@@ -87,9 +87,26 @@ try {
   check((await json(await api(`/api/tasks/${id}/activity`))).sessions.some(s => s.tokens_in === 20), "OTLP telemetry persists and updates session usage");
   const client = new Client({ name: "cloudflare-test", version: "1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(base + "/mcp"), { requestInit: { headers: { Authorization: "Bearer " + token } } }));
-  check((await client.listTools()).tools.length === 13, "MCP SDK initialization and tool listing work in workerd");
+  check((await client.listTools()).tools.length === 17, "MCP SDK initialization and tool listing work in workerd");
   check((await client.callTool({ name: "get_task", arguments: { id } })).content[0].text.includes(id), "MCP reads shared SQLite task state");
+  await client.callTool({ name: "report_progress", arguments: { task: id, progress: 40, step: "workerd fixture" } });
+  check((await json(await api(`/api/tasks/${id}`))).exec.progress === 40, "MCP progress updates the execution summary in Durable Objects");
   await client.close();
+
+  // 执行端：登记 → 派发 → 领取 → 回报（Durable Object 里的新表与迁移）
+  const runner = (await json(await api("/api/runners", "POST", { name: "workerd-runner", kind: "cloud", projects: ["fixture"], agents: ["codex"], mode: "exec" }))).runner;
+  const dispatched = await json(await api(`/api/tasks/${id}/dispatch`, "POST", { mode: "exec", agent: "codex", runner: runner.id, force: true }));
+  check(dispatched.run.status === "queued" && dispatched.prompt.includes(id), "dispatch queues a run for a registered runner");
+  const claimed = await json(await api(`/api/runners/${runner.id}/claim`, "POST", {}));
+  check(claimed.run && claimed.run.id === dispatched.run.id && claimed.run.location === "cloud", "runner claims the queued run atomically");
+  await json(await api(`/api/runs/${claimed.run.id}/update`, "POST", { status: "running", step: "codex 运行中" }));
+  check((await json(await api("/api/exec"))).active.some(r => r.id === claimed.run.id && r.health === "running"), "execution overview reports live runs and runner health");
+  // 多端同步：对端接口在 workerd 中可用
+  const info = await json(await api("/api/sync/info"));
+  const changes = await json(await api(`/api/sync/changes?since=-1&peer=fixture-peer`));
+  check(info.kind === "cloud" && changes.changes.some(c => c.coll === "tasks" && c.id === id), "sync change feed lists Durable Object documents");
+  const applied = await json(await api("/api/sync/apply", "POST", { peer: "fixture-peer", docs: [{ coll: "rules", id: "R-sync", data: { text: "同步来的规则", status: "待写入" }, updatedAt: new Date().toISOString(), base: changes.seq }, { coll: "tasks", id, data: { title: "stale" }, base: 0 }] }));
+  check(applied.applied === 1 && applied.rejected.includes(`tasks/${id}`), "sync apply accepts new documents and rejects stale overwrites");
   const zipResponse = await api("/api/projects/fixture/kit.zip");
   const zip = await JSZip.loadAsync(await zipResponse.arrayBuffer());
   const script = await zip.file("agent-kit-fixture/scripts/agent/hub.sh").async("string");

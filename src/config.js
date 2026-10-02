@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { syncConfig } from "./config-sync.js";
 
 const env = process.env;
 const num = (v, d) => (v === undefined || v === "" || !Number.isFinite(Number(v)) ? d : Number(v));
@@ -49,7 +50,15 @@ export const config = {
   },
   // Codex 等只上报 token 数的 Agent，用它估算成本（美元 / 百万 token），例如 {"gpt-5.5":{"in":1.25,"out":10}}
   priceTable: (() => { try { return JSON.parse(env.PRICE_TABLE || "{}"); } catch { return {}; } })(),
-  version: "0.1.0",
+  // Hub 身份：网页标题栏、同步对端显示用。local = 本机 Docker / Node；cloud = 云端部署
+  hubName: (env.HUB_NAME || "本地 Hub").trim().slice(0, 40),
+  hubKind: env.HUB_KIND === "cloud" ? "cloud" : "local",
+  // 执行管理：执行记录多久没有心跳算“停滞”；执行端多久没有心跳算“离线”
+  runStallMinutes: Math.max(1, num(env.RUN_STALL_MINUTES, 15)),
+  runnerOfflineSeconds: Math.max(15, num(env.RUNNER_OFFLINE_SECONDS, 90)),
+  // 多端同步：本 Hub 主动与对端 Hub（通常是云端）双向同步任务、规则、复盘和设置
+  sync: syncConfig(env),
+  version: "0.2.0",
 };
 
 export function hubBaseUrl(req) {

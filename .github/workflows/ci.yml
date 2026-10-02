@@ -22,6 +22,7 @@ jobs:
       - run: npm run test:security
       - run: npm run test:preflight
       - run: npm run test:connect
+      - run: npm run test:merge
       - run: node --disable-warning=ExperimentalWarning test/oauth.mjs
       - run: npm run build:cloudflare
       - run: npm run types:cloudflare
