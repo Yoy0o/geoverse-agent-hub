@@ -4,7 +4,9 @@
 
 - **一个服务**：Node 22 + SQLite，单容器，`docker compose up -d` 即可
 - **Cloudflare 原生部署**：Workers + Durable Objects SQLite，支持同样的 REST、SSE、MCP、钩子与 OAuth；全站默认要求 Access 签名身份，参见 [Cloudflare 部署指南](docs/CLOUDFLARE-DEPLOY.md)
-- **原界面不变**：今日 / 看板 / 项目 / 录入 / 规则库 / 复盘 / 导出，新增「接入」页和任务「Agent 活动」
+- **原界面不变**：今日 / 看板 / 项目 / 录入 / 规则库 / 复盘 / 导出，新增「接入」「执行」页和任务「Agent 活动」
+- **执行管理**：每次执行都有记录——在哪台电脑或哪个云端会话、哪个 Agent、做到哪一步、最近心跳；停滞和失联自动进入待办。可以从网页或手机把任务派发给登记的执行端（runner.mjs），或交给 Claude Code 网页版等云端 Agent
+- **云端唯一**：云端 Hub 是唯一的数据来源，网页、手机、各电脑的 Agent 和执行端都连它；网络中断时上报先暂存在本机、恢复后按原始时间补发。本地 Hub 通过一次同步并入云端后退役为只读（[迁移手册](docs/CLOUD-ONLY.md)）
 - **四条接入通道**：MCP（读任务单、交回执）、钩子（注入任务单、拦截受保护路径、结束前验证、回传回执）、OTel（成本 / token）、git 钩子与 task.sh（开工、检查、提交、合并）
 - **已适配**：Claude Code、Codex、Cursor、GitHub Copilot（CLI / VS Code / 云端 Agent）、Kiro；Claude 网页 / 手机 / Cowork 通过 OAuth 连接器接入
 
@@ -41,7 +43,14 @@ bash scripts/agent/task.sh check <任务编号>           # 验证 + 越界检�
 bash scripts/agent/task.sh merge <任务编号>           # 合并，hub 标记已合并
 ```
 
-完整部署说明（服务器 / 公网 / claude.ai 连接器 / 各 Agent 细节 / 排查）见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+人不在电脑前时：在执行任务的电脑上常驻执行端，网页或手机上“派发执行”即可开工；云端会话里用 `task.sh attach <任务编号>` 接手。
+
+```bash
+node kit/runner.mjs register --name 工作站 --project <项目名>=<仓库路径> --agents claude-code,codex   # 加 --exec 允许无人值守启动 Agent
+node kit/runner.mjs start
+```
+
+执行端、派发、进度和多端同步的设计与配置见 [执行管理与多端同步](docs/EXECUTION-AND-SYNC.md)。完整部署说明（服务器 / 公网 / claude.ai 连接器 / 各 Agent 细节 / 排查）见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
 ## Cloudflare
 
@@ -54,7 +63,7 @@ npm run build:cloudflare               # 校验与打包，不发布
 
 云端发布前，按 [部署指南](docs/CLOUDFLARE-DEPLOY.md) 配置入口、Access Team Domain、应用 AUD 与 Hub Secret。没有自有域名时按 [当前账户的云端准备指南](docs/CLOUDFLARE-CLOUD-PREPARATION.md) 使用 `workers.dev` + Access；新实例先用 `bootstrap:cloudflare` 创建关闭入口的 Worker，完成 Access 后再运行 `deploy:cloudflare`。发布命令包含配置检查，首次发布还需 secrets-file。当前实例已在 Access 保护下开放，预览 URL 保持关闭；缺少密钥或身份配置时拒绝提供网页与数据。个人数据保存在 SQLite Durable Object 中，部署无需当前电脑保持开机。
 
-日常操作分别见 [本地管理使用指南](docs/LOCAL-MANAGEMENT-GUIDE.md) 与 [远程管理使用指南](docs/REMOTE-MANAGEMENT-GUIDE.md)。本机可同时使用 `agent-hub-local` / `agent-hub-cloud` MCP；连接脚本的 `--name` 与 `--profile` 保存独立配置，两端任务数据不自动同步。
+部署形态为**云端唯一**：先按 [云端唯一：迁移与日常](docs/CLOUD-ONLY.md) 把本地 Hub 的数据并入云端并停用本地 Hub，之后日常操作见 [远程管理使用指南](docs/REMOTE-MANAGEMENT-GUIDE.md)。[本地管理使用指南](docs/LOCAL-MANAGEMENT-GUIDE.md) 保留作停用前的参考。整个管理流程的图示见 [管理流程](docs/MANAGEMENT-FLOW.md)。
 
 网页登录使用随机、持久化、可撤销的会话，默认 7 天有效；退出会使旧 Cookie 立即失效。Agent 仍使用 Hub Bearer 令牌；远程接入可额外传入 Access 服务凭证。
 
@@ -62,6 +71,7 @@ npm run build:cloudflare               # 校验与打包，不发布
 
 ```powershell
 npm run test:security
+npm run test:unit
 node --disable-warning=ExperimentalWarning test/oauth.mjs
 npm run build:cloudflare
 npm run test:cloudflare
@@ -81,8 +91,9 @@ npm ci && HUB_DATA_DIR=./data npm start      # 需要 Node ≥ 22.5（内置 nod
 
 ```
 src/        服务端：server、api（REST + SSE）、mcp、hooks + ingest（钩子归一化）、otlp、oauth、kit（接入包生成）
+            exec（执行记录 / 执行端 / 派发）、sync + merge（多端同步与冲突合并）
 public/     网页（原工作台移植）+ shim.js（把 window.claude 能力接到 REST / SSE）
-kit/        接入包模板：hub.sh、guard.sh、stop-verify.sh、task.sh、verify.sh、git 钩子、install.sh、connect.mjs
+kit/        接入包模板：hub.sh、guard.sh、stop-verify.sh、task.sh、verify.sh、git 钩子、install.sh、connect.mjs、runner.mjs（执行端）
 migrate/    从 Artifact 工作台导出的数据
 test/       端到端测试：bash test/e2e.sh
 ```

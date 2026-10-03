@@ -3,7 +3,7 @@
 services:
   agent-hub:
     build: .
-    image: agent-hub:0.1.0
+    image: agent-hub:0.3.0
     container_name: agent-hub
     restart: unless-stopped
     env_file:
