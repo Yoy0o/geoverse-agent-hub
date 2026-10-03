@@ -227,7 +227,8 @@ Kiro 的钩子格式在 2026 年更新为 `.kiro/hooks/*.json`（`version: "v1"`
 - **隐私**：钩子载荷默认只存工具名、文件路径、命令摘要（`HUB_STORE_PAYLOAD=summary`），不存代码内容和提示词；OTel 默认不记录提示词
 - **令牌轮换**：改 `.env` 的 `HUB_TOKEN` 后重启，各电脑重新跑 connect.mjs；网页登录态随之失效
 - **执行记录保留**：已结束的执行记录与事件同样保留 `EVENT_RETENTION_DAYS` 天；任务里的执行摘要永久保留
-- **多端同步**：`.env` 设置 `HUB_SYNC_URL`、`HUB_SYNC_TOKEN`（及 Access 服务凭证）后重启；`docker compose exec agent-hub node src/cli.js sync --dry-run` 预览，网页“同步与设置”查看状态与冲突记录
+- **云端唯一**：当前部署形态。本地 Hub 用 `node src/cli.js retire <云端地址>` 并入云端后退役为只读，见 [云端唯一：迁移与日常](CLOUD-ONLY.md)
+- **断网暂存**：钩子、提交、进度上报失败时暂存在本机 `~/.cache/agent-hub/spool`，恢复后补发；`bash scripts/agent/hub.sh ping` 查看积压，`hub.sh flush` 立即补发，`hub.sh backup` 下载 JSON 备份
 
 ## 10. 排查
 

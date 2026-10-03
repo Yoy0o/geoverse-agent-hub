@@ -6,7 +6,7 @@
 - **Cloudflare 原生部署**：Workers + Durable Objects SQLite，支持同样的 REST、SSE、MCP、钩子与 OAuth；全站默认要求 Access 签名身份，参见 [Cloudflare 部署指南](docs/CLOUDFLARE-DEPLOY.md)
 - **原界面不变**：今日 / 看板 / 项目 / 录入 / 规则库 / 复盘 / 导出，新增「接入」「执行」页和任务「Agent 活动」
 - **执行管理**：每次执行都有记录——在哪台电脑或哪个云端会话、哪个 Agent、做到哪一步、最近心跳；停滞和失联自动进入待办。可以从网页或手机把任务派发给登记的执行端（runner.mjs），或交给 Claude Code 网页版等云端 Agent
-- **多端同步**：本地 Hub 与云端 Hub 增量双向同步任务、规则、复盘和设置，两端都改过的按规则合并并留下冲突记录
+- **云端唯一**：云端 Hub 是唯一的数据来源，网页、手机、各电脑的 Agent 和执行端都连它；网络中断时上报先暂存在本机、恢复后按原始时间补发。本地 Hub 通过一次同步并入云端后退役为只读（[迁移手册](docs/CLOUD-ONLY.md)）
 - **四条接入通道**：MCP（读任务单、交回执）、钩子（注入任务单、拦截受保护路径、结束前验证、回传回执）、OTel（成本 / token）、git 钩子与 task.sh（开工、检查、提交、合并）
 - **已适配**：Claude Code、Codex、Cursor、GitHub Copilot（CLI / VS Code / 云端 Agent）、Kiro；Claude 网页 / 手机 / Cowork 通过 OAuth 连接器接入
 
@@ -63,7 +63,7 @@ npm run build:cloudflare               # 校验与打包，不发布
 
 云端发布前，按 [部署指南](docs/CLOUDFLARE-DEPLOY.md) 配置入口、Access Team Domain、应用 AUD 与 Hub Secret。没有自有域名时按 [当前账户的云端准备指南](docs/CLOUDFLARE-CLOUD-PREPARATION.md) 使用 `workers.dev` + Access；新实例先用 `bootstrap:cloudflare` 创建关闭入口的 Worker，完成 Access 后再运行 `deploy:cloudflare`。发布命令包含配置检查，首次发布还需 secrets-file。当前实例已在 Access 保护下开放，预览 URL 保持关闭；缺少密钥或身份配置时拒绝提供网页与数据。个人数据保存在 SQLite Durable Object 中，部署无需当前电脑保持开机。
 
-日常操作分别见 [本地管理使用指南](docs/LOCAL-MANAGEMENT-GUIDE.md) 与 [远程管理使用指南](docs/REMOTE-MANAGEMENT-GUIDE.md)。本机可同时使用 `agent-hub-local` / `agent-hub-cloud` MCP；连接脚本的 `--name` 与 `--profile` 保存独立配置。两端数据默认独立；在本地 `.env` 配置 `HUB_SYNC_*` 后本地 Hub 会与云端 Hub 双向同步，见[多端同步](docs/EXECUTION-AND-SYNC.md#5-多端同步)。
+部署形态为**云端唯一**：先按 [云端唯一：迁移与日常](docs/CLOUD-ONLY.md) 把本地 Hub 的数据并入云端并停用本地 Hub，之后日常操作见 [远程管理使用指南](docs/REMOTE-MANAGEMENT-GUIDE.md)。[本地管理使用指南](docs/LOCAL-MANAGEMENT-GUIDE.md) 保留作停用前的参考。整个管理流程的图示见 [管理流程](docs/MANAGEMENT-FLOW.md)。
 
 网页登录使用随机、持久化、可撤销的会话，默认 7 天有效；退出会使旧 Cookie 立即失效。Agent 仍使用 Hub Bearer 令牌；远程接入可额外传入 Access 服务凭证。
 
@@ -71,7 +71,7 @@ npm run build:cloudflare               # 校验与打包，不发布
 
 ```powershell
 npm run test:security
-npm run test:merge
+npm run test:unit
 node --disable-warning=ExperimentalWarning test/oauth.mjs
 npm run build:cloudflare
 npm run test:cloudflare

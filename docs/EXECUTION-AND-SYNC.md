@@ -1,6 +1,6 @@
 # 执行管理与多端同步
 
-适用于 agent-hub 0.2.0。核对日期：2026-10-02。
+适用于 agent-hub 0.3.0。核对日期：2026-10-03。部署形态已确定为**云端唯一**，迁移步骤见 [云端唯一：迁移与日常](CLOUD-ONLY.md)。
 
 这份文档说明平台怎样管理“任务在哪里执行、做到哪一步、是否还活着”，以及本地 Hub 和云端 Hub 怎样保持一致。日常操作见[本地管理指南](LOCAL-MANAGEMENT-GUIDE.md)与[远程管理指南](REMOTE-MANAGEMENT-GUIDE.md)。
 
@@ -51,41 +51,37 @@
 - Agent 钩子：会话开始 / 结束、修改代码、运行工具、一轮结束、守卫拦截……
 - MCP 调用：`get_task`、`log_note`、`submit_receipt` 等
 - git 钩子的提交上报、`task.sh check` 的检查结果、结束前验证
-- 执行端心跳：自动执行时，Agent 进程活着执行端就每 15 秒报一次
+- 执行端心跳：自动执行时，Agent 进程活着执行端就每 30 秒报一次
 - 主动汇报进度：`hub.sh progress`、`task.sh progress`、MCP `report_progress`
+
+网络中断时，这些上报先暂存在本机 `~/.cache/agent-hub/spool`，下一次上报成功后在后台按顺序补发，并带上原始时间：事件按发生时间入库，补发的旧事件不会把已经停滞的执行“续命”。
 
 hub.sh 每次上报都带上执行编号（`.agent/run` 或 `AGENT_HUB_RUN`）、执行端编号、执行位置和主机名。执行位置自动识别：设置了 `CLAUDE_CODE_REMOTE`（Claude Code 云端会话）、`CODESPACES`、`GITHUB_ACTIONS`、`GITPOD_WORKSPACE_ID` 时记为“云端”，其余为“本机”；也可以用 `AGENT_HUB_LOCATION=local|cloud` 明确指定。
 
 进度没有主动汇报时，Hub 按里程碑自动推进（只升不降）：领取 5%、工作区就绪 10%、会话开始 15%、首次修改 30%、提交 50%、检查未通过 60% / 通过 80%、交付回执 100%。主动汇报的数值优先。
 
-## 3. 推荐拓扑
+## 3. 部署形态：云端唯一
 
 ```
             手机 / 浏览器
                  │
                  ▼
-     ┌──────── 云端 Hub ────────┐   多端同步（可选）   ┌──── 本地 Hub ────┐
-     │ 任务 · 评审 · 派发       │◄──────────────────►│ 离线时继续记录    │
-     │ 执行总览 · 执行端在线    │   任务、规则、复盘、 │ （Docker）        │
-     └──────▲───────────▲──────┘   设置、执行摘要      └──────────────────┘
-            │           │
-  runner 心跳 / 领取    钩子 / MCP
-            │           │
-  ┌─── 工作站 ───────┐  ┌─── 云端会话 ─────────────────────────┐
-  │ runner.mjs       │  │ Claude Code 网页版 / Codex 云端 /     │
-  │ → task.sh start  │  │ Copilot 云端 Agent                    │
-  │ → worktree       │  │ → task.sh attach <任务编号>           │
-  │ → Claude / Codex │  └──────────────────────────────────────┘
-  └──────────────────┘
+     ┌──────────── 云端 Hub（唯一数据来源）────────────┐
+     │ 任务 · 评审 · 派发 · 执行总览 · 执行端在线 · 规则 │        ┌──── 本地 Hub ─────┐
+     └──────▲──────────────▲──────────────▲───────────┘ ─ ─ ─ ─ │ 已停用（只读）     │
+            │              │              │      可选：只读镜像   │ 或直接停掉         │
+   runner 心跳 / 领取   钩子 / MCP / OTel   钩子 / MCP            └───────────────────┘
+            │              │              │
+  ┌─── 工作站 ───────┐  ┌─ 工作站上的 Agent ─┐  ┌─── 云端会话 ───────────────────────┐
+  │ runner.mjs       │  │ Claude Code / Codex │  │ Claude Code 网页版 / Codex 云端 /   │
+  │ → task.sh start  │  │ Cursor / Kiro …     │  │ Copilot 云端 Agent                  │
+  │ → worktree       │  │ 断网时上报暂存补发   │  │ → task.sh attach <任务编号>         │
+  └──────────────────┘  └────────────────────┘  └────────────────────────────────────┘
 ```
 
-| 方案 | 适合 | 说明 |
-| --- | --- | --- |
-| **A. 云端为控制面（推荐）** | 多设备、经常不在电脑前 | 执行端和云端会话都连云端 Hub；本地 Hub 可选，通过同步保留一份并在断网时继续用 |
-| B. 只用本地 Hub | 单机、离线 | 执行端连本地 Hub；不需要同步 |
-| C. 本地为主，同步到云端 | 主要在本机工作，偶尔用手机看 | 执行端连本地 Hub；云端能看到执行摘要、能评审，但派发要在本地 Hub 上做 |
+所有入口都连云端 Hub：网页、手机、每台电脑的 MCP / 钩子 / 执行端、云端 Agent。本地 Docker Hub 用 `node src/cli.js retire <云端地址>` 退役为只读（写入返回 410 并指向云端），可以停掉，也可以留作只读镜像。
 
-规则只有一条：**执行端连在哪个 Hub，就在哪个 Hub 派发和取消。** 执行记录和执行端不随同步移动，任务里的执行摘要会。
+为什么不再用两套 Hub：Agent 本身要联网调用模型，“断网时改用本地 Hub”几乎用不上；两套 Hub 意味着两个令牌、两组 MCP 名称、两个 profile，以及“记录在哪边”的持续困惑。网络抖动由本地暂存补发解决（第 2.2 节）。执行端连在哪个 Hub，就在哪个 Hub 派发和取消——云端唯一之后，这条规则自然只有一个答案。
 
 ## 4. 三种执行方式
 
@@ -116,6 +112,10 @@ node runner.mjs start [--profile cloud]        # 常驻：tmux、开机自启或
 node runner.mjs status                         # 本机配置与 hub 上的在线状态
 ```
 
+Claude Code 的 print 模式没人能批准权限请求，所以默认模板除了自动接受编辑，只额外放行接入包脚本（统一验证、进度汇报、task.sh check）和 `git status / diff / log / add / commit`；其余命令仍会被拒绝，需要时在 `runner.json` 里自己加。Codex 的 `--full-auto` 沙箱默认不联网，需要装依赖的项目先在工作区里装好。
+
+Windows 上执行端用 Git Bash 运行仓库脚本（通过 `where git` 和常见安装位置查找，绝不使用 System32 的 WSL 启动器，也可以 `register --bash <路径>` 指定）；npm 安装的 `.cmd` 命令会被解析成用 node 直接运行它指向的脚本，提示词不经过 cmd.exe 转义。
+
 `runner.mjs` 可以从 Hub 下载（`<hub>/runner.mjs`，云端 Hub 受 Access 保护时需要带服务凭证），也可以直接用仓库里的 `kit/runner.mjs`。项目路径和 Agent 启动命令只保存在本机 `~/.config/agent-hub/runner[-<profile>].json`，Hub 只知道项目名和 Agent 名。
 
 在任务详情点“派发执行”，或让任何连接了 agent-hub 的 Agent 调用 `dispatch_task`：
@@ -123,9 +123,9 @@ node runner.mjs status                         # 本机配置与 hub 上的在�
 | 方式 | 执行端做什么 | 适合 |
 | --- | --- | --- |
 | 准备工作区（默认） | 领取 → `task.sh start --reuse` 建分支和 worktree、写入任务单 → 回报“待启动” | 回到电脑前直接打开 Agent 开始；人始终在环 |
-| 自动执行 | 准备工作区后无人值守启动 Agent（默认 `claude -p … --permission-mode acceptEdits`、`codex exec --full-auto …`），输出写入 `.agent/run-<执行编号>.log`；进程退出后从输出里兜底提取回执 | 风险低、验收标准清楚的任务；执行端必须用 `--exec` 登记 |
+| 自动执行 | 准备工作区后无人值守启动 Agent（默认 `claude -p … --permission-mode acceptEdits --allowedTools "Bash(bash scripts/agent/*)" "Bash(git status*)" …`、`codex exec --full-auto …`），输出写入 `.agent/run-<执行编号>.log`；进程退出后从输出里兜底提取回执 | 风险低、验收标准清楚的任务；执行端必须用 `--exec` 登记 |
 
-执行端每 15 秒心跳一次：报告自己还在跑的执行，拿回需要停止的执行和可以领取的数量。领取在 Hub 内原子完成，两台执行端不会领到同一条派发。不指定执行端时，派发给任一登记了该项目（且有该 Agent）的执行端。
+执行端每 30 秒心跳一次（`--interval` 可调；Hub 超过 90 秒没收到心跳算离线）：报告自己还在跑的执行，拿回需要停止的执行和可以领取的数量。领取在 Hub 内原子完成，两台执行端不会领到同一条派发。不指定执行端时，派发给任一登记了该项目（且有该 Agent）的执行端。
 
 自动执行时，结束前验证、受保护路径守卫、git 钩子照常生效；回执优先由 Stop 钩子送达，执行端的兜底提取按指纹去重。Agent 退出却没有回执时，执行记为“失败”，任务进入“需介入”。
 
@@ -141,6 +141,8 @@ node runner.mjs status                         # 本机配置与 hub 上的在�
 4. 仓库里没有脚本时，Agent 调用 MCP `start_task(id, location="cloud")` 登记开工，过程中用 `report_progress` 汇报，结束时 `submit_receipt`。
 
 ## 5. 多端同步
+
+云端唯一之后，同步只在两个场合用到：**迁移**（把本地 Hub 的数据并入云端，`retire` 会自动做最后一次同步）和**可选的只读镜像**（停用后的本地 Hub 以 `pull` 模式定期从云端拉取，断网时能查阅）。下面是机制说明。
 
 ### 5.1 同步什么
 
@@ -217,9 +219,12 @@ docker compose exec agent-hub node src/cli.js sync
 | `HUB_SYNC_ACCESS_CLIENT_ID` / `_SECRET` | 空 | 对端在 Cloudflare Access 后面时的服务凭证 |
 | `HUB_SYNC_INTERVAL` | `60` | 自动同步间隔（秒），`0` 只手动 |
 | `HUB_SYNC_MODE` | `both` | `both` / `pull` / `push` |
+| `HUB_RETIRED_TO` | 空 | 本 Hub 退役为只读并指向这个地址（一般用 `node src/cli.js retire` 设置，不必写环境变量） |
 | `AGENT_HUB_LOCATION` | 自动识别 | 脚本端：强制执行位置 `local` / `cloud` |
 | `AGENT_HUB_HOST` | 主机名 | 脚本端：显示的机器名 |
 | `AGENT_HUB_RUNNER_FILE` | `~/.config/agent-hub/runner.json` | 执行端配置文件位置 |
+| `AGENT_HUB_BASH` | 自动查找 | 执行端运行仓库脚本用的 bash（Windows 上指向 Git Bash） |
+| `AGENT_HUB_SPOOL` | `~/.cache/agent-hub/spool` | 上报失败时的暂存目录（最多 500 条）；`AGENT_HUB_NO_SPOOL=1` 关闭暂存 |
 
 ## 8. 接口
 
@@ -244,6 +249,8 @@ docker compose exec agent-hub node src/cli.js sync
 | 自动执行“失败：没有收到交付回执” | 看 `.agent/run-<执行编号>.log`；Agent 需要按 AGENTS.md 输出 `agent-receipt` 代码块 |
 | 一直显示“停滞” | 那台机器上 Agent 是否还在运行；会话结束了但没交回执时，补交回执或重新派发 |
 | 执行显示“本机”，实际在云端 | 云端环境没有被自动识别：设置 `AGENT_HUB_LOCATION=cloud` |
+| 网络断过一阵后进度对不上 | `hub.sh ping` 看有没有积压，`hub.sh flush` 立即补发 |
+| 写入提示“本 Hub 已停用” | 这台电脑还连着退役的本地 Hub：按[云端唯一](CLOUD-ONLY.md#34-切换这台电脑)重新连接 |
 | 同步失败：401 | `HUB_SYNC_TOKEN` 要填**对端** Hub 的令牌 |
 | 同步失败：要求 Access 认证 / 403 | 服务凭证缺失、过期，或不在对端的 Service Auth 策略与 `ACCESS_SERVICE_IDS` 里 |
 | 同步后出现大量“冲突” | 第一次同步两个都有数据的 Hub 时正常；逐条核对冲突日志，确认后清除 |
