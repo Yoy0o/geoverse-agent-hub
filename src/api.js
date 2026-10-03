@@ -183,7 +183,7 @@ export function apiRoutes(app, auth) {
   app.post("/api/tasks/:id/dispatch", auth, handle((req) => dispatch(taskOr404(req.params.id), req.body || {}, who(req))));
   app.post("/api/tasks/:id/progress", auth, handle((req) => {
     const b = req.body || {}; const m = execMeta(req);
-    const run = reportProgress(taskOr404(req.params.id), Object.assign({}, b, { run: b.run || m.run, runner: b.runner || m.runner, location: b.location || m.location, host: b.host || m.host }), who(req));
+    const run = reportProgress(taskOr404(req.params.id), Object.assign({}, b, { run: b.run || m.run, runner: b.runner || m.runner, location: b.location || m.location, host: b.host || m.host, at: m.at }), who(req));
     return { run: runView(run), task: getTask(req.params.id) };
   }));
   app.get("/api/runners", auth, handle(() => runnersView()));
@@ -212,9 +212,11 @@ export function apiRoutes(app, auth) {
     const ch = channels();
     const out = {};
     const get = (a) => (out[a] = out[a] || { agent: a, name: agentName(a), lastAt: null, events24h: 0, sessions7d: 0, cost7dUsd: 0, tokens7d: 0, channels: {} });
-    ev.forEach((r) => { const o = get(r.agent); o.lastAt = r.last_at; o.events24h = r.n_recent; });
-    ss.forEach((s) => { const o = get(s.agent || "unknown"); o.sessions7d++; o.cost7dUsd += s.cost_usd || 0; o.tokens7d += (s.tokens_in || 0) + (s.tokens_out || 0); });
-    Object.entries(ch).forEach(([k, at]) => { const [a, c] = k.split("|"); get(a).channels[c] = at; });
+    const later = (o, at) => { if (at && String(at) > String(o.lastAt || "")) o.lastAt = at; };
+    ev.forEach((r) => { const o = get(r.agent); later(o, r.last_at); o.events24h = r.n_recent; });
+    ss.forEach((s) => { const o = get(s.agent || "unknown"); o.sessions7d++; o.cost7dUsd += s.cost_usd || 0; o.tokens7d += (s.tokens_in || 0) + (s.tokens_out || 0); later(o, s.last_at); });
+    // 超过 24 小时没有事件的 Agent：最近一次时间取各接入通道的记录，不再扫描全部历史事件
+    Object.entries(ch).forEach(([k, at]) => { const [a, c] = k.split("|"); const o = get(a); o.channels[c] = at; later(o, at); });
     Object.values(out).forEach((o) => { o.cost7dUsd = Math.round(o.cost7dUsd * 100) / 100; });
     res.json({ agents: Object.values(out).sort((a, b) => String(b.lastAt || "").localeCompare(String(a.lastAt || ""))), known: AGENT_NAMES });
   });

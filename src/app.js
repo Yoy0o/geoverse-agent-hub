@@ -10,6 +10,8 @@ import { hookRoutes } from "./hooks.js";
 import { mcpRoutes } from "./mcp.js";
 import { DEFAULT_AGENTS } from "./domain.js";
 import { wireExec } from "./exec.js";
+import { retiredTo, retiredHint } from "./retire.js";
+import { sessionStartResponse, kindOf } from "./ingest.js";
 
 
 export async function createApp({ serveStatic = true, trustProxy = 0 } = {}) {
@@ -44,6 +46,22 @@ export async function createApp({ serveStatic = true, trustProxy = 0 } = {}) {
     if (who.via === "cookie" && req.headers["x-requested-with"] !== "agent-hub") return res.status(403).json({ error: "csrf" });
     req.who = who; next();
   };
+
+  // 已停用（云端唯一）：已登录的写请求一律返回 410 并给出云端地址；会话开始的钩子把切换提示交给 Agent。
+  // 读接口、登录、从云端拉取的同步继续可用；MCP 在工具层面只保留只读工具
+  app.use(async (req, res, next) => {
+    if (["GET", "HEAD", "OPTIONS"].includes(req.method) || /^\/api\/(login|logout|sync\/run)$/.test(req.path) || req.path === "/mcp") return next();
+    const to = retiredTo();
+    if (!to) return next();
+    if (!(await identify(req, oauthProvider))) return next();
+    const hint = retiredHint(to);
+    const hook = req.path.match(/^\/hooks\/([a-z0-9-]+)$/i);
+    if (hook && kindOf(String(req.query.event || "")) === "session.start") {
+      const out = sessionStartResponse(hook[1].toLowerCase(), "【agent-hub】" + hint);
+      return out.type === "text" ? res.type("text/plain; charset=utf-8").send(out.body) : res.json(out.body);
+    }
+    res.status(410).json({ error: "retired", hint, retiredTo: to });
+  });
 
   // 钩子与遥测要在 JSON 解析之前挂（它们自己读原始请求体）
   hookRoutes(app, auth);

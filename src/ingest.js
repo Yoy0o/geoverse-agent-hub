@@ -110,7 +110,7 @@ export function ingest(o) {
   const repo = repoOf(q, x.cwd);
   const task = resolveTask({ hint: q.task, branch: q.branch, cwd: x.cwd, session: x.session });
   const display = agentName(agent);
-  const at = new Date().toISOString();
+  const at = q.at || new Date().toISOString();
 
   markChannel(agent, o.channel || "hooks");
   if (x.session) {
@@ -140,7 +140,7 @@ export function ingest(o) {
   }
   // 执行记录：心跳、当前步骤、在哪台机器 / 哪个云端会话上执行
   if (t) {
-    try { touchFromEvent(t, { kind, run: q.run, runner: q.runner, location: q.location, host: q.host, agent, session: x.session, branch: q.branch, cwd: x.cwd, summary: o.summary }); }
+    try { touchFromEvent(t, { kind, run: q.run, runner: q.runner, location: q.location, host: q.host, agent, session: x.session, branch: q.branch, cwd: x.cwd, summary: o.summary, at: q.at }); }
     catch (e) { console.error("[exec]", e && e.message); }
   }
 
@@ -159,7 +159,7 @@ export function ingest(o) {
   }
 
   if (kind === "transcript" && !receiptResult) return { event: null, task: t, context };
-  const ev = addEvent({ agent, kind, raw: o.event || "", task: t ? t.id : null, session: x.session, repo, branch: q.branch || "", summary: o.summary || summarize(kind, x, q.reason), data: payloadForStore(o.payload, x) });
+  const ev = addEvent({ at: q.at || undefined, agent, kind, raw: o.event || "", task: t ? t.id : null, session: x.session, repo, branch: q.branch || "", summary: o.summary || summarize(kind, x, q.reason), data: payloadForStore(o.payload, x) });
   return { event: ev, task: t, context, receipt: receiptResult };
 }
 

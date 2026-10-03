@@ -1,6 +1,6 @@
 {
   "name": "agent-hub",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "自托管 Agent 工作台：任务、评审、规则 + 多 coding agent 接入（MCP / 钩子 / OTel）",
   "main": "src/server.js",
   "scripts": {
@@ -17,7 +17,7 @@
     "types:cloudflare": "wrangler types .cloudflare/worker-configuration.d.ts",
     "test:security": "node --test test/security.test.mjs",
     "test:connect": "node --test test/connect.test.mjs",
-    "test:merge": "node --test test/merge.test.mjs",
+    "test:unit": "node --test test/merge.test.mjs test/store.test.mjs test/runner.test.mjs",
     "test:cloudflare": "node test/cloudflare.mjs"
   },
   "dependencies": {

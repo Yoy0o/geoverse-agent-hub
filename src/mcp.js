@@ -10,6 +10,7 @@ import {
 import { markChannel } from "./ingest.js";
 import { config } from "#hub/config";
 import { startRun, touchFromEvent, reportProgress, dispatch, cancelRun, runsView, runnersView, RUN_ACTIVE, RUN_LABEL, MODE_LABEL } from "./exec.js";
+import { retiredTo, retiredHint } from "./retire.js";
 
 const text = (s) => ({ content: [{ type: "text", text: String(s) }] });
 const json = (o) => text(JSON.stringify(o, null, 2));
@@ -20,6 +21,12 @@ function build(agent) {
   const server = new McpServer({ name: "agent-hub", version: config.version }, {
     instructions: "agent-hub 是研发任务工作台。执行任务时：开始先调用 start_task（或 get_task）读取任务单（任务编号在分支名 agent/<编号>-… 或 specs/<编号>.md 里），按验收标准和允许修改的范围工作；阶段性进展用 report_progress 汇报；结束时调用 submit_receipt 提交交付回执。在云端会话里执行时，start_task 传 location=cloud。人问“今天要处理什么”时调用 today；问任务在哪里执行、做到哪一步时调用 list_runs。",
   });
+  // 已停用的 Hub：只读工具照常可用，写工具返回切换到云端的提示
+  const retired = retiredTo();
+  if (retired) {
+    const reg = server.registerTool.bind(server);
+    server.registerTool = (name, def, fn) => reg(name, def, def.annotations && def.annotations.readOnlyHint ? fn : async () => err(retiredHint(retired)));
+  }
   const log = (tool, taskId, summary) => {
     markChannel(agent, "mcp");
     addEvent({ agent, kind: "mcp", raw: tool, task: taskId || null, summary: summary || "MCP " + tool });

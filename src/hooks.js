@@ -9,9 +9,12 @@ const safe = (v, n = 120) => String(v || "").replace(/[^\w.@:+\-\u4e00-\u9fff ]/
 // 执行位置：hub.sh 从 .agent/run、runner.json 和环境变量（云端会话、Codespaces、CI）推断后放在请求头里
 export function execMeta(req) {
   const location = String(req.get("x-hub-location") || req.query.location || "").toLowerCase();
+  // 网络中断后补发的上报带原始时间（最多回溯 7 天），事件按发生时间记录，也不会把停滞的执行误判为活着
+  const at = Date.parse(String(req.get("x-hub-at") || ""));
   return {
     run: safe(req.get("x-hub-run") || req.query.run, 64), runner: safe(req.get("x-hub-runner") || req.query.runner, 64),
     location: location === "cloud" || location === "local" ? location : "", host: safe(b64(req.get("x-hub-host")) || req.query.host),
+    at: Number.isFinite(at) && at <= Date.now() + 60000 && at > Date.now() - 7 * 86400000 ? new Date(Math.min(at, Date.now())).toISOString() : "",
   };
 }
 function meta(req) {

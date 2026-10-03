@@ -58,7 +58,9 @@ export const config = {
   runnerOfflineSeconds: Math.max(15, num(env.RUNNER_OFFLINE_SECONDS, 90)),
   // 多端同步：本 Hub 主动与对端 Hub（通常是云端）双向同步任务、规则、复盘和设置
   sync: syncConfig(env),
-  version: "0.2.0",
+  // 云端唯一：本 Hub 退役为只读并指向云端（也可以用 node src/cli.js retire 开启）
+  retiredTo: String(env.HUB_RETIRED_TO || "").trim().replace(/\/+$/, ""),
+  version: "0.3.0",
 };
 
 export function hubBaseUrl(req) {

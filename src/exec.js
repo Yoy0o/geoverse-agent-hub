@@ -144,7 +144,8 @@ export function touchFromEvent(t, e) {
     if (!working) return run;
     return startRun(t, { run: run && run.mode === "handoff" ? run.id : "", runner: e.runner, location: e.location || (e.agent === "claude-ai" ? "cloud" : "local"), host: e.host, agent: e.agent, session: e.session, branch: e.branch, worktree: e.cwd }, e.agent);
   }
-  const f = { heartbeatAt: nowIso() };
+  // 补发的旧上报（带原始时间）不能把心跳往前推到“现在”
+  const f = { heartbeatAt: e.at ? (String(e.at) > String(run.heartbeatAt || "") ? e.at : run.heartbeatAt) : nowIso() };
   if (["claimed", "ready"].includes(run.status) && ["session.start", "prompt", "edit", "tool"].includes(e.kind)) { f.status = "running"; if (!run.startedAt) f.startedAt = f.heartbeatAt; }
   if (e.session && !run.session) f.session = clip(e.session, 200);
   if (e.runner && !run.runner && getRunner(String(e.runner))) f.runner = String(e.runner);
@@ -168,7 +169,7 @@ export function reportProgress(t, b = {}, origin = "hub") {
   if (run && (run.task !== t.id || !RUN_ACTIVE.includes(run.status))) run = null;
   if (!run) run = activeRun(t.id);
   if (!run || run.status === "queued") run = startRun(t, { run: run ? run.id : "", agent: origin, location: b.location, host: b.host, runner: b.runner, session: b.session }, origin);
-  const f = { heartbeatAt: nowIso() };
+  const f = { heartbeatAt: b.at && String(b.at) < String(run.heartbeatAt || "") ? run.heartbeatAt : b.at || nowIso() };
   const p = pct(b.progress);
   if (p !== undefined) f.progress = p;
   if (b.step) f.step = clip(b.step);

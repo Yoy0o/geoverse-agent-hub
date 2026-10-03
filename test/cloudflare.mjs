@@ -85,6 +85,8 @@ try {
   const attributes = Object.entries({ "service.name": "claude-code", "session.id": "fixture-session", "agent_hub.task": id, "event.name": "claude_code.api_request", input_tokens: "20", output_tokens: "10", cost_usd: "0.01" }).map(([key, value]) => ({ key, value: { stringValue: value } }));
   await json(await api("/v1/logs", "POST", { resourceLogs: [{ resource: { attributes: [] }, scopeLogs: [{ logRecords: [{ attributes }] }] }] }));
   check((await json(await api(`/api/tasks/${id}/activity`))).sessions.some(s => s.tokens_in === 20), "OTLP telemetry persists and updates session usage");
+  const status = await json(await api("/api/agents/status"));
+  check(status.agents.some(a => a.agent === "codex" && a.events24h > 0), "agent status uses the bounded time-index query in Durable Objects SQLite");
   const client = new Client({ name: "cloudflare-test", version: "1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(base + "/mcp"), { requestInit: { headers: { Authorization: "Bearer " + token } } }));
   check((await client.listTools()).tools.length === 17, "MCP SDK initialization and tool listing work in workerd");

@@ -26,6 +26,7 @@ export function createStore(db) {
     tool_calls INTEGER NOT NULL DEFAULT 0, edits INTEGER NOT NULL DEFAULT 0, denies INTEGER NOT NULL DEFAULT 0,
     turns INTEGER NOT NULL DEFAULT 0, channels TEXT NOT NULL DEFAULT '');
   CREATE INDEX IF NOT EXISTS ss_task ON sessions(task);
+  CREATE INDEX IF NOT EXISTS ss_last ON sessions(last_at);
   CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT NOT NULL, exp INTEGER);
   CREATE TABLE IF NOT EXISTS tombstones(
     coll TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL, src TEXT NOT NULL DEFAULT '', at TEXT NOT NULL,
@@ -43,6 +44,7 @@ export function createStore(db) {
     created_at TEXT NOT NULL, claimed_at TEXT, started_at TEXT, heartbeat_at TEXT, ended_at TEXT);
   CREATE INDEX IF NOT EXISTS runs_task ON runs(task, created_at);
   CREATE INDEX IF NOT EXISTS runs_status ON runs(status);
+  CREATE INDEX IF NOT EXISTS runs_created ON runs(created_at);
   `);
   // 旧库升级：文档的变更序号与来源（多端同步用）
   function columns(table) { try { return db.prepare(`PRAGMA table_info(${table})`).all().map((r) => r.name); } catch { return null; } }
@@ -196,11 +198,10 @@ export function createStore(db) {
     const cut = new Date(Date.now() - days * 86400000).toISOString();
     return db.prepare("DELETE FROM events WHERE at < ?").run(cut).changes;
   }
+  // 只扫描时间窗口内的事件。Cloudflare 按扫描行数计费；不指定索引时规划器会为了 GROUP BY 扫描整个 ev_agent 索引
   function agentStatus(sinceIso) {
-    return db.prepare(`SELECT agent, COUNT(*) n, MAX(at) last_at,
-        SUM(CASE WHEN at >= ? THEN 1 ELSE 0 END) n_recent,
-        GROUP_CONCAT(DISTINCT kind) kinds
-      FROM events WHERE agent<>'' GROUP BY agent`).all(sinceIso);
+    return db.prepare(`SELECT agent, COUNT(*) n_recent, MAX(at) last_at
+      FROM events INDEXED BY ev_at WHERE at >= ? AND agent<>'' GROUP BY agent`).all(sinceIso);
   }
   function channelStatus() {
     return db.prepare(`SELECT agent, raw, MAX(at) last_at FROM events WHERE agent<>'' AND kind IN ('mcp','otel') GROUP BY agent, raw`).all();

@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import { kv, bus, getDoc, docChanges, putSynced, deleteSynced, getTombstone, currentSeq, transaction, validColl, validId, addEvent } from "#hub/db";
 import { config } from "#hub/config";
 import { resolveConflict } from "./merge.js";
+import { retiredTo } from "./retire.js";
 
 const nowIso = () => new Date().toISOString();
 const key = (d) => d.coll + "/" + d.id;
@@ -14,10 +15,15 @@ const PAGE = 500;
 export function hubInfo() {
   let id = kv.get("hub:id");
   if (!id) { id = "hub-" + crypto.randomBytes(6).toString("hex"); kv.set("hub:id", id); }
-  return { id, name: config.hubName, kind: config.hubKind, version: config.version };
+  return { id, name: config.hubName, kind: config.hubKind, version: config.version, retiredTo: retiredTo() };
 }
 const state = () => kv.get("sync:state") || { pulled: -1, pushed: -1, retry: [] };
 const saveState = (st) => kv.set("sync:state", st);
+// 还没推到对端的本端修改（停用前必须为 0）
+export function pendingLocal() {
+  const st = state();
+  return { changes: docChanges({ since: st.pushed ?? -1, src: "", limit: 2000 }).changes.length, retry: (st.retry || []).length, lastOk: st.lastOk || null, peer: st.peer || null };
+}
 export function syncConflicts() { return kv.get("sync:conflicts") || []; }
 export function clearConflicts() { kv.del("sync:conflicts"); bus.emit("sync", syncSummary()); }
 export function syncSummary() {
@@ -38,6 +44,7 @@ export function changesFor(since, peer, limit = PAGE) {
 export function applyFromPeer(peer, docs) {
   const src = String(peer || "").slice(0, 64);
   if (!src || src === hubInfo().id) throw Object.assign(new Error("bad peer"), { status: 400, expose: true });
+  if (retiredTo()) throw Object.assign(new Error("本 Hub 已停用，不再接收同步写入：" + retiredTo()), { status: 410, expose: true });
   const rejected = []; let applied = 0;
   transaction(() => {
     for (const d of Array.isArray(docs) ? docs.slice(0, 2000) : []) {

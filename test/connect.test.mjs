@@ -46,3 +46,31 @@ test('connection profiles coexist and authentication pages never modify user con
     await fs.rm(home,{recursive:true,force:true});
   }
 });
+
+test('--remove deletes only the named MCP registration, keeps other entries and backs files up', async () => {
+  const root=path.resolve('.cloudflare');
+  await fs.mkdir(root,{recursive:true});
+  const home=await fs.mkdtemp(path.join(root,'connect-remove-'));
+  const toml=path.join(home,'.codex/config.toml'), cursor=path.join(home,'.cursor/mcp.json'), env=path.join(home,'.config/agent-hub/local.env');
+  await fs.mkdir(path.dirname(toml),{recursive:true}); await fs.mkdir(path.dirname(cursor),{recursive:true}); await fs.mkdir(path.dirname(env),{recursive:true});
+  await fs.writeFile(toml,'model = "fixture"\n[mcp_servers.agent-hub-local]\nurl = "http://127.0.0.1:8787/mcp?agent=codex"\n[mcp_servers.agent-hub-local.http_headers]\nAuthorization = "Bearer local"\n[mcp_servers.agent-hub-cloud]\nurl = "https://cloud.invalid/mcp?agent=codex"\n');
+  await fs.writeFile(cursor,JSON.stringify({mcpServers:{'agent-hub-local':{url:'http://127.0.0.1:8787/mcp'},other:{url:'https://other.invalid'}}}));
+  await fs.writeFile(env,'AGENT_HUB_URL=http://127.0.0.1:8787\nAGENT_HUB_TOKEN=local\n');
+  try {
+    const child=spawn(process.execPath,['kit/connect.mjs','--remove','agent-hub-local','--agents','codex,cursor,kiro','--profile','local'],{env:{...process.env,HOME:home,USERPROFILE:home},stdio:['ignore','pipe','pipe']});
+    let output='';child.stdout.on('data',d=>output+=d);child.stderr.on('data',d=>output+=d);
+    const [code]=await once(child,'exit');
+    assert.equal(code,0,output);
+    const t=await fs.readFile(toml,'utf8');
+    assert.ok(!t.includes('agent-hub-local')&&!t.includes('Bearer local'));
+    assert.ok(t.includes('[mcp_servers.agent-hub-cloud]')&&t.includes('model = "fixture"'));
+    const c=JSON.parse(await fs.readFile(cursor,'utf8'));
+    assert.deepEqual(Object.keys(c.mcpServers),['other']);
+    await assert.rejects(fs.access(env));
+    assert.ok((await fs.readdir(path.dirname(toml))).some(f=>f.includes('bak-agent-hub')));
+    await assert.rejects(fs.access(path.join(home,'.kiro')));
+  } finally {
+    assert.ok(path.resolve(home).startsWith(root+path.sep));
+    await fs.rm(home,{recursive:true,force:true});
+  }
+});

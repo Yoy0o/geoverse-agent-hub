@@ -8,6 +8,7 @@
   function codeFor(status, j) {
     if (j && j.code) return j.code;
     if (status === 401) return "revoked";
+    if (status === 410) return "retired";
     if (status === 413) return "quota_exceeded";
     if (status === 429) return "resource_exhausted";
     return "invalid_argument";
@@ -19,7 +20,7 @@
     if (r.status === 401) { showLogin(); throw Object.assign(new Error("unauthorized"), { code: "revoked" }); }
     const ct = r.headers.get("content-type") || "";
     const data = ct.includes("json") ? await r.json().catch(() => ({})) : await r.text();
-    if (!r.ok) throw Object.assign(new Error((data && data.error) || String(r.status)), { code: codeFor(r.status, data), status: r.status });
+    if (!r.ok) throw Object.assign(new Error((data && (data.hint || data.error)) || String(r.status)), { code: codeFor(r.status, data), status: r.status });
     return data;
   }
 

@@ -9,7 +9,7 @@ T=$(mktemp -d)
 export HUB_DATA_DIR="$T/data" HUB_TOKEN=e2e-token PORT
 export AGENT_HUB_URL="http://127.0.0.1:$PORT" AGENT_HUB_TOKEN=e2e-token AGENT_HUB_CONFIG="$T/none"
 # 测试本身可能跑在云端会话或 CI 里：固定执行位置，云端识别单独测试
-export AGENT_HUB_LOCATION=local AGENT_HUB_HOST=e2e-host AGENT_HUB_RUNNER_FILE="$T/runner.json"
+export AGENT_HUB_LOCATION=local AGENT_HUB_HOST=e2e-host AGENT_HUB_RUNNER_FILE="$T/runner.json" AGENT_HUB_SPOOL="$T/spool"
 pass=0; fail=0
 ok(){ echo "  ✓ $1"; pass=$((pass+1)); }
 ko(){ echo "  ✗ $1"; fail=$((fail+1)); }
@@ -160,6 +160,8 @@ check "hub 不可达：静默且退出码 0" '[ "$R" = "rc=0" ]'
 R=$(printf '{"session_id":"x"}' | AGENT_HUB_URL= AGENT_HUB_CONFIG=/nonexistent bash scripts/agent/hub.sh report claude-code PostToolUse; echo "rc=$?")
 check "未配置 hub：静默且退出码 0" '[ "$R" = "rc=0" ]'
 
+check "接入状态：近 24 小时事件按 Agent 汇总" '[ "$(api $AGENT_HUB_URL/api/agents/status | jget "(a=>a.events24h>0&&!!a.channels.hooks)(o.agents.find(a=>a.agent===\"claude-code\"))")" = "true" ]'
+
 echo "== 8. MCP 与 connect.mjs =="
 cd "$ROOT"
 node test/mcp.mjs "$AGENT_HUB_URL" "$HUB_TOKEN" "$ID2" > "$T/mcp.log" 2>&1; rc=$?
@@ -284,6 +286,36 @@ check "同步状态：对端名称、最近成功时间" '[ "$(api2 $H2/api/sync
 check "能力接口返回 Hub 身份（名称 / 类型）" '[ "$(api2 $H2/api/capabilities | jget "o.hub.name+\"/\"+o.hub.kind")" = "e2e 本地/local" ]'
 HUB_DATA_DIR="$T/data3" HUB_SYNC_URL="$AGENT_HUB_URL" HUB_SYNC_TOKEN=wrong node --disable-warning=ExperimentalWarning src/cli.js sync > "$T/sync-wrong.log" 2>&1
 check "错误的对端令牌给出明确提示" 'grep -q "对端拒绝了令牌" "$T/sync-wrong.log"'; grep -q "对端拒绝了令牌" "$T/sync-wrong.log" || cat "$T/sync-wrong.log"
+
+echo "== 11. 云端唯一：离线暂存与补发、停用本地 Hub =="
+ID7=$(api -X POST -d '{"title":"离线补发","project":"demo","allow":"src/**"}' "$AGENT_HUB_URL/api/tasks" | jget o.id)
+cd "$REPO" && bash scripts/agent/task.sh start "$ID7" offline >/dev/null 2>&1
+WT7="$T/demo-app.worktrees/$ID7"; cd "$WT7"
+T0=$(date -u +%s)
+MSG7=$'完成。\n\n```agent-receipt\ntask: '"$ID7"$'\nstatus: done\nsummary: 断网时交付的回执\nverify:\n  - bash scripts/agent/verify.sh: pass\nscope: ok\nrisks: 无\n```'
+node -e 'process.stdout.write(JSON.stringify({session_id:"off-1",cwd:process.argv[1],hook_event_name:"Stop",last_assistant_message:process.argv[2]}))' "$WT7" "$MSG7" | AGENT_HUB_URL=http://127.0.0.1:9 bash scripts/agent/hub.sh report claude-code Stop
+R=$(AGENT_HUB_URL=http://127.0.0.1:9 bash scripts/agent/hub.sh progress 70 "离线时的进度")
+check "连不上 hub：回执与进度暂存到本地" '[ "$(ls "$T/spool" | grep -c "\.req$")" = "2" ] && printf "%s" "$R" | grep -q "已暂存"'
+check "暂存期间任务状态不变" '[ "$(api $AGENT_HUB_URL/api/tasks/$ID7 | jget o.status)" = "执行中" ]'
+check "hub.sh ping 提示有暂存的上报" 'bash scripts/agent/hub.sh ping | grep -q "2 条暂存的上报"'
+sleep 2
+check "hub.sh flush 按顺序补发" 'bash scripts/agent/hub.sh flush | grep -q "已补发 2 条，剩余 0 条"'
+check "补发的回执生效 → 待评审" '[ "$(api $AGENT_HUB_URL/api/tasks/$ID7 | jget "o.status+\"/\"+o.receipt.summary")" = "待评审/断网时交付的回执" ]'
+check "补发的事件按原始时间记录" '[ "$(api "$AGENT_HUB_URL/api/tasks/$ID7/activity" | jget "Math.floor(Date.parse(o.events.find(e=>e.kind===\"stop\").at)/1000)<=$T0+1")" = "true" ]'
+check "hub.sh backup 下载 JSON 备份" 'bash scripts/agent/hub.sh backup "$T/backups" | grep -q "已备份" && grep -q "$ID7" "$T"/backups/agent-hub-backup-*.json'
+cd "$ROOT"
+check "没有配置同步时拒绝停用（无法确认数据已到云端）" '! HUB_DATA_DIR="$T/data3" node --disable-warning=ExperimentalWarning src/cli.js retire "$AGENT_HUB_URL" > "$T/retire0.log" 2>&1 && grep -q "没有配置 HUB_SYNC" "$T/retire0.log"'
+L2=$(api2 -X POST -d '{"title":"停用前最后一个本地任务","project":"demo"}' "$H2/api/tasks" | jget o.id)
+HUB_DATA_DIR="$T/data2" HUB_SYNC_URL="$AGENT_HUB_URL" HUB_SYNC_TOKEN=e2e-token node --disable-warning=ExperimentalWarning src/cli.js retire "$AGENT_HUB_URL" > "$T/retire.log" 2>&1; rc=$?
+check "retire：自动做最后一次同步并停用本地 Hub" '[ $rc -eq 0 ] && grep -q "已停用为只读" "$T/retire.log"'; [ $rc -eq 0 ] || cat "$T/retire.log"
+check "停用前未同步的本地任务已经到了云端" '[ "$(api $AGENT_HUB_URL/api/tasks/$L2 | jget o.title)" = "停用前最后一个本地任务" ]'
+check "停用后写入返回 410 并给出云端地址" '[ "$(curl -s -o "$T/410.json" -w %{http_code} -H "Authorization: Bearer e2e-token-2" -H "Content-Type: application/json" -d "{\"title\":\"x\"}" $H2/api/tasks)" = "410" ] && grep -q "$AGENT_HUB_URL" "$T/410.json"'
+check "停用后读取照常可用" '[ "$(api2 $H2/api/tasks/$L2 | jget o.id)" = "$L2" ]'
+check "能力接口标明已停用" '[ "$(api2 $H2/api/capabilities | jget o.hub.retiredTo)" = "$AGENT_HUB_URL" ]'
+check "会话开始的钩子把“切换到云端”提示交给 Agent" 'curl -s -H "Authorization: Bearer e2e-token-2" -H "Content-Type: application/json" -d "{\"session_id\":\"r1\"}" "$H2/hooks/claude-code?event=SessionStart" | jget o.hookSpecificOutput.additionalContext | grep -q "已停用"'
+check "MCP：写工具提示已停用，只读工具照常" '! node test/mcp-call.mjs "$H2" e2e-token-2 create_task "{\"title\":\"x\"}" > "$T/mcp-retired.log" 2>&1 && grep -q "已停用" "$T/mcp-retired.log" && node test/mcp-call.mjs "$H2" e2e-token-2 get_task "{\"id\":\"$L2\"}" | grep -q "$L2"'
+HUB_DATA_DIR="$T/data2" node --disable-warning=ExperimentalWarning src/cli.js retire --undo >/dev/null 2>&1
+check "retire --undo 恢复可写" '[ "$(api2 -X POST -d "{\"title\":\"恢复后可写\"}" $H2/api/tasks | jget "!!o.id")" = "true" ]'
 
 echo
 echo "通过 $pass 项，失败 $fail 项"

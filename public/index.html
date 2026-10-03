@@ -334,16 +334,19 @@ function fileSafe(s){ return String(s||"").replace(/[\\/:*?"<>|#^\[\]]/g,"-").re
 
 /* ---------- store (db or local memory) ---------- */
 const queues = {};
+// 同一文档的写入排队执行。失败时提示一次并继续以失败结束，调用方后续的“已保存”提示不会执行；队列本身不中断
 function enqueue(path, fn){
-  const p = (queues[path] || Promise.resolve()).then(fn).catch(err => { reportErr(err); });
-  queues[path] = p; return p;
+  const p = (queues[path] || Promise.resolve()).then(fn).catch(err => { reportErr(err); throw Object.assign(err || new Error("failed"), {reported:true}); });
+  queues[path] = p.catch(() => {}); return p;
 }
+window.addEventListener("unhandledrejection", e => { if (e.reason && e.reason.reported) e.preventDefault(); });
 function reportErr(err){
   const code = err && err.code;
   if (code === "quota_exceeded") toast("存储已满：请先删除一些旧任务或规则");
   else if (code === "invalid_argument") { toast("没有写入权限或数据格式不合法"); }
   else if (code === "resource_exhausted") toast("操作太频繁，请稍后再试");
   else if (code === "revoked") { S.mode="local"; renderSync(); toast("数据连接已断开"); }
+  else if (code === "retired") toast(err.message || "本 Hub 已停用（只读）");
   else toast("保存失败，请重试");
 }
 function coll(name){ return name==="tasks"?S.tasks:name==="rules"?S.rules:null; }
@@ -469,6 +472,8 @@ function execCount(){
   return bad ? '<span class="cnt">'+bad+'</span>' : act.length ? '<span class="cnt" style="background:var(--accent-soft);color:var(--accent)">'+act.length+'</span>' : "";
 }
 function renderBanner(){
+  const to = S.hub.caps && S.hub.caps.hub && safeUrl(S.hub.caps.hub.retiredTo);
+  if (to){ const html = '<div class="banner"><b>本 Hub 已停用（只读）</b>：任务、评审和派发都在 <a href="'+esc(to)+'" target="_blank" rel="noopener noreferrer">云端 Hub</a> 上进行。这里保留的是停用时的数据'+(S.sync&&S.sync.configured?'，并按同步设置继续从云端更新':'')+'；在这里的修改不会保存。</div>'; if ($("#banner").innerHTML !== html) $("#banner").innerHTML = html; return; }
   $("#banner").innerHTML = S.mode==="local" ? '<div class="banner">没有连接到 agent-hub：请登录后刷新页面。改动只保留在本次打开的页面里。</div>' : (!S.hub.online ? '<div class="banner">与 agent-hub 的实时连接中断，正在重连…</div>' : "");
 }
 
@@ -1581,9 +1586,11 @@ function syncPanel(){
   if (!sy) return '<div class="panel"><h2>多端同步</h2><div class="skel"></div></div>';
   const head = '<h2>多端同步 <small>'+(h?esc(h.name)+" · "+(h.kind==="cloud"?"云端":"本地"):"")+'</small></h2>';
   if (!sy.configured) return '<div class="panel syncbox">'+head+
-    '<p class="hint" style="margin:0">本 Hub 没有配置同步对端，任务只保存在这里。要让本地 Hub 和云端 Hub 保持一致（离线时用本地、出门用手机看云端），在<b>发起同步的一端</b>（通常是本地 Docker Hub 的 .env）设置下面几项后重启；对端无需配置。</p>'+
-    '<pre class="code">HUB_SYNC_URL=https://&lt;云端 Hub 地址&gt;\nHUB_SYNC_TOKEN=&lt;云端 Hub 的令牌&gt;\nHUB_SYNC_ACCESS_CLIENT_ID=&lt;Access 服务凭证 ID&gt;\nHUB_SYNC_ACCESS_CLIENT_SECRET=&lt;Access 服务凭证 Secret&gt;\nHUB_SYNC_INTERVAL=60        # 秒，0 = 只手动\nHUB_SYNC_MODE=both          # both / pull / push</pre>'+
-    '<p class="hint" style="margin:0">同步任务、规则、复盘和设置；执行摘要（在哪里执行、进度）随任务一起过去。执行端和执行明细留在各自连接的 Hub。</p></div>';
+    (h && h.kind==="cloud"
+      ? '<p class="hint" style="margin:0"><b>云端唯一</b>：这里是唯一的数据来源，所有电脑、执行端和云端 Agent 都连这台 Hub，不需要同步。备份用下面的“下载 JSON 备份”，或在任意一台电脑上定期运行 <code>bash scripts/agent/hub.sh backup</code>。</p>'
+      : '<p class="hint" style="margin:0">采用“云端唯一”时，本地 Hub 只在迁移时用一次同步：在 .env 设置下面几项并重启，运行 <code>node src/cli.js retire &lt;云端地址&gt;</code> 完成最后一次同步后停用本 Hub。对端无需配置。</p>'+
+        '<pre class="code">HUB_SYNC_URL=https://&lt;云端 Hub 地址&gt;\nHUB_SYNC_TOKEN=&lt;云端 Hub 的令牌&gt;\nHUB_SYNC_ACCESS_CLIENT_ID=&lt;Access 服务凭证 ID&gt;\nHUB_SYNC_ACCESS_CLIENT_SECRET=&lt;Access 服务凭证 Secret&gt;\nHUB_SYNC_INTERVAL=0         # 迁移只需手动同步\nHUB_SYNC_MODE=both</pre>')+
+    '</div>';
   const l = sy.last || {}; const pv = S.syncPreview;
   const lastTxt = !sy.last ? "还没有同步过" : l.ok ? fmtDate(l.at)+" · 拉取 "+l.pulled+" · 推送 "+l.pushed+(l.conflicts?" · 合并冲突 "+l.conflicts:"")+" · "+l.ms+" ms" : "失败（"+fmtDate(l.at)+"）";
   const log = sy.conflictLog || [];
@@ -1599,7 +1606,7 @@ function renderHub(){
   const h = S.hub.caps && S.hub.caps.hub; const el = $("#hubtag");
   if (h){
     const c = h.kind==="cloud";
-    const html = '<span class="hubtag '+(c?"cloud":"local")+'" title="当前打开的是'+(c?"云端":"本地")+' Hub：'+esc(h.name)+'。本地与云端的数据靠多端同步保持一致。">'+(c?ICON.cloud:ICON.local)+esc(h.name)+'</span>';
+    const html = '<span class="hubtag '+(c?"cloud":"local")+'" title="当前打开的是'+(c?"云端":"本地")+' Hub：'+esc(h.name)+(h.retiredTo?"（已停用，只读）":"")+'">'+(c?ICON.cloud:ICON.local)+esc(h.name)+(h.retiredTo?" · 已停用":"")+'</span>';
     if (el.innerHTML !== html) el.innerHTML = html;
     document.title = "Agent 工作台 · "+h.name;
   }
@@ -1637,7 +1644,7 @@ async function init(){
   db.doc("config/main").onSnapshot(d => { if (d.exists) S.config = normalizeConfig(d.data()); S.loaded.config = true; scheduleRender(); }, subErr);
   try { S.hub.caps = await hub.caps(); } catch(e){}
   renderHub(); loadExec(); loadSync();
-  refreshStatus(); loadFeed();
+  loadFeed();
   if (S.tab==="agents") refreshStatus();
   window.addEventListener("hub:event", e => {
     const ev = e.detail; if (!ev) return;
@@ -1651,7 +1658,8 @@ async function init(){
   window.addEventListener("hub:runner", e => onRunner(e.detail));
   window.addEventListener("hub:sync", () => loadSync());
   window.addEventListener("hub:reconnect", () => { loadExec(); loadSync(); });
-  setInterval(refreshStatus, 60000);
+  // 接入状态只在“接入”页、页面可见时刷新（避免后台标签页持续产生查询）
+  setInterval(() => { if (S.tab==="agents" && !document.hidden) refreshStatus(); }, 60000);
   // 心跳、停滞、“几分钟前”都随时间变化：每 30 秒刷新一次（输入框内容和焦点会保留）
   setInterval(() => { if (!document.hidden && !modalEl) scheduleRender(); }, 30000);
   render();
