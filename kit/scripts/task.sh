@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # 本地多 Agent 任务流：一个任务 = 一个分支 + 一个独立 worktree，多个 Agent 可以并行互不干扰。状态自动同步到 agent-hub。
 #   bash scripts/agent/task.sh new "<标题>" [--risk L2] [--allow 'src/**'] [--budget 60]   在 hub 新建任务，输出任务编号
-#   bash scripts/agent/task.sh start <任务编号> [简述] [--agent codex]   新建分支 agent/<编号>-<简述> 和 worktree，写入任务单，hub 标记“执行中”
+#   bash scripts/agent/task.sh start <任务编号> [简述] [--agent codex] [--reuse]   新建分支 agent/<编号>-<简述> 和 worktree，写入任务单，hub 标记“执行中”
+#   bash scripts/agent/task.sh attach <任务编号> [--agent claude-code]   不建 worktree，把当前目录绑定到任务（云端会话、主工作区）
 #   bash scripts/agent/task.sh run <任务编号> <claude|codex|gemini|cursor|kiro|code>   在该任务的 worktree 里启动 Agent
+#   bash scripts/agent/task.sh progress <任务编号> <0-100|-> <步骤>   汇报进度
+#   bash scripts/agent/task.sh status <任务编号>          任务状态与执行情况（在哪里执行、做到哪一步）
 #   bash scripts/agent/task.sh list                      列出进行中的任务 worktree
+#   bash scripts/agent/task.sh path <任务编号>            输出该任务的 worktree 路径
 #   bash scripts/agent/task.sh brief <任务编号>           从 hub 重新拉取任务单到 specs/<编号>.md
 #   bash scripts/agent/task.sh check <任务编号> [范围…]   统一验证 + 越界检查，结果回传 hub
 #   bash scripts/agent/task.sh merge <任务编号>           合并回主分支（--no-ff，带 Task 尾注），hub 标记“已合并”
@@ -26,6 +30,15 @@ branch_of(){ git -C "$MAIN" for-each-ref --format='%(refname:short)' "refs/heads
 dir_of(){ local b; b=$(branch_of); [ -n "$b" ] || return 0; git -C "$MAIN" worktree list --porcelain | awk -v b="branch refs/heads/$b" '/^worktree /{p=substr($0,10)} $0==b{print p}'; }
 hub_on(){ [ -n "$HUB_URL" ]; }
 jarr(){ local out="" x; for x in "$@"; do out="$out${out:+,}$(hub_jstr "$x")"; done; printf '[%s]' "$out"; }
+# 通知 hub 开工 / 接手，记录执行记录编号到 .agent/run（之后钩子上报都带上它）
+hub_start(){ # $1=目录 $2=分支 $3=attach(true/false)
+  local resp rid
+  resp=$(hub_api POST "/api/tasks/$id/start" "{\"branch\":$(hub_jstr "$2"),\"worktree\":$(hub_jstr "$1"),\"repo\":$(hub_jstr "$NAME"),\"agent\":$(hub_jstr "$agent"),\"run\":$(hub_jstr "${AGENT_HUB_RUN:-}"),\"location\":$(hub_jstr "$(hub_location)"),\"host\":$(hub_jstr "$(hub_host)"),\"runner\":$(hub_jstr "$(hub_runner)"),\"attach\":$3}" 2>/dev/null) || return 1
+  rid=$(printf '%s' "$resp" | sed -nE 's/.*"run":\{"id":"(run-[0-9a-f]+)".*/\1/p' | head -n 1)
+  mkdir -p "$1/.agent"; printf '*\n' > "$1/.agent/.gitignore"
+  [ -z "$rid" ] || printf '%s\n' "$rid" > "$1/.agent/run"
+  return 0
+}
 write_brief(){ # $1=目录
   mkdir -p "$1/specs" "$1/.agent"; printf '*\n' > "$1/.agent/.gitignore"; printf '%s\n' "$id" > "$1/.agent/task"
   if hub_on && hub_api GET "/api/tasks/$id/brief" > "$1/specs/$id.md.tmp" 2>/dev/null; then mv "$1/specs/$id.md.tmp" "$1/specs/$id.md"; return 0; fi
@@ -47,24 +60,55 @@ case "$cmd" in
   start)
     need_id
     shift 2 || true
-    slug=task; agent=""
-    while [ $# -gt 0 ]; do case "$1" in --agent) agent=${2:-}; shift 2 || shift ;; --*) shift ;; *) slug=$1; shift ;; esac; done
+    slug=task; agent=""; reuse=0
+    while [ $# -gt 0 ]; do case "$1" in --agent) agent=${2:-}; shift 2 || shift ;; --reuse) reuse=1; shift ;; --*) shift ;; *) slug=$1; shift ;; esac; done
     slug=$(printf '%s' "$slug" | tr -cs 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//')
-    b="agent/$id-${slug:-task}"
-    [ -z "$(branch_of)" ] || { echo "任务 $id 的分支已存在：$(branch_of)" >&2; exit 1; }
-    mkdir -p "$WT_ROOT"
-    git -C "$MAIN" worktree add -q -b "$b" "$WT_ROOT/$id" "$BASE"
-    echo "已创建 worktree：$WT_ROOT/$id（分支 $b，基于 $BASE）"
-    if hub_on; then
-      hub_api POST "/api/tasks/$id/start" "{\"branch\":$(hub_jstr "$b"),\"worktree\":$(hub_jstr "$WT_ROOT/$id"),\"repo\":$(hub_jstr "$NAME"),\"agent\":$(hub_jstr "$agent")}" >/dev/null 2>&1 \
-        && echo "agent-hub：任务 $id 已标记为“执行中”" || echo "提示：agent-hub 更新失败（任务编号不存在或 hub 未启动），可稍后在工作台手动推进" >&2
+    if [ -n "$(branch_of)" ]; then
+      # 退回后重新派发、执行端重试：复用已有的分支和 worktree
+      [ $reuse -eq 1 ] || { echo "任务 $id 的分支已存在：$(branch_of)（复用请加 --reuse）" >&2; exit 1; }
+      b=$(branch_of); d=$(dir_of)
+      if [ -z "$d" ]; then mkdir -p "$WT_ROOT"; git -C "$MAIN" worktree add -q "$WT_ROOT/$id" "$b"; d="$WT_ROOT/$id"; fi
+      echo "复用 worktree：$d（分支 $b）"
+    else
+      b="agent/$id-${slug:-task}"; d="$WT_ROOT/$id"
+      mkdir -p "$WT_ROOT"
+      git -C "$MAIN" worktree add -q -b "$b" "$d" "$BASE"
+      echo "已创建 worktree：$d（分支 $b，基于 $BASE）"
     fi
-    if write_brief "$WT_ROOT/$id"; then echo "任务单已写入：$WT_ROOT/$id/specs/$id.md"
-    else echo "下一步：把工作台“复制任务单”的内容保存为 $WT_ROOT/$id/specs/$id.md"; fi
+    if hub_on; then
+      hub_start "$d" "$b" false && echo "agent-hub：任务 $id 已标记为“执行中”（$(hub_location) · $(hub_host)）" || echo "提示：agent-hub 更新失败（任务编号不存在或 hub 未启动），可稍后在工作台手动推进" >&2
+    fi
+    if write_brief "$d"; then echo "任务单已写入：$d/specs/$id.md"
+    else echo "下一步：把工作台“复制任务单”的内容保存为 $d/specs/$id.md"; fi
     echo
     echo "在这个目录里打开任意 Agent（会话开始时钩子会自动注入任务单）："
-    echo "  cd \"$WT_ROOT/$id\" && claude        # 或 codex / cursor . / kiro . / code .（Copilot）"
+    echo "  cd \"$d\" && claude        # 或 codex / cursor . / kiro . / code .（Copilot）"
     echo "  也可以：bash scripts/agent/task.sh run $id claude"
+    ;;
+  attach)
+    # 云端会话（Claude Code 网页版、Codex 云端、Copilot 云端 Agent）或主工作区：不建 worktree，直接把当前目录绑定到任务
+    need_id; shift 2 || true; agent=""
+    while [ $# -gt 0 ]; do case "$1" in --agent) agent=${2:-}; shift 2 || shift ;; *) shift ;; esac; done
+    hub_on || { echo "agent-hub 未配置：设置 AGENT_HUB_URL / AGENT_HUB_TOKEN（云端环境里配置为环境变量 / 密钥）" >&2; exit 1; }
+    d=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    mkdir -p "$d/.agent"; printf '*\n' > "$d/.agent/.gitignore"; printf '%s\n' "$id" > "$d/.agent/task"
+    hub_start "$d" "$(hub_branch)" true || { echo "agent-hub 更新失败：任务编号不存在或连不上 hub" >&2; exit 1; }
+    echo "agent-hub：已接手任务 $id（$(hub_location) · $(hub_host)），之后的钩子上报都会关联到它"
+    if write_brief "$d"; then echo "任务单已写入：$d/specs/$id.md"; fi
+    ;;
+  path)
+    need_id; d=$(dir_of); [ -n "$d" ] || { echo "找不到任务 $id 的 worktree" >&2; exit 1; }
+    printf '%s\n' "$d"
+    ;;
+  progress)
+    need_id; p=${3:-}; shift 3 2>/dev/null || shift $#
+    case "$p" in ''|-|*[!0-9]*) pj=null ;; *) pj=$p ;; esac
+    hub_on || { echo "agent-hub 未配置" >&2; exit 1; }
+    hub_api POST "/api/tasks/$id/progress?agent=${AGENT_HUB_AGENT:-task-sh}" "{\"progress\":$pj,\"step\":$(hub_jstr "$*")}" >/dev/null && echo "已汇报 $id：${pj/null/—}% $*"
+    ;;
+  status)
+    need_id; hub_on || { echo "agent-hub 未配置" >&2; exit 1; }
+    hub_api GET "/api/tasks/$id" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const t=JSON.parse(s),e=t.exec||{};const L={queued:"排队中",claimed:"已领取",ready:"待启动",running:"执行中",blocked:"阻塞",done:"已交付",failed:"失败",cancelled:"已取消",lost:"失联",superseded:"已替代"};console.log(t.id+" · "+t.status+" · "+(t.title||""));if(e.run)console.log("执行："+(L[e.status]||e.status)+" · "+(e.location==="cloud"?"云端":"本机")+(e.runnerName||e.host?" · "+(e.runnerName||e.host):"")+(e.agent?" · "+e.agent:"")+(e.progress!=null?" · "+e.progress+"%":"")+(e.step?" · "+e.step:"")+(e.heartbeatAt?" · 心跳 "+new Date(e.heartbeatAt).toLocaleString():""));else console.log("执行：还没有执行记录");if(e.note)console.log("说明："+e.note)})'
     ;;
   run)
     need_id; ag=${3:-claude}; d=$(dir_of); [ -n "$d" ] || { echo "找不到任务 $id 的 worktree，先运行 task.sh start" >&2; exit 1; }
@@ -153,5 +197,5 @@ case "$cmd" in
     if [ -n "$b" ]; then git -C "$MAIN" branch -d "$b" || echo "分支 $b 还没合并；确定放弃请运行：git branch -D $b"; fi
     echo "已清理任务 $id"
     ;;
-  *) sed -n '2,11p' "$0" ;;
+  *) sed -n '2,15p' "$0" ;;
 esac

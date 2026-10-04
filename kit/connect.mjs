@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // agent-hub 本机接入（每台电脑运行一次）：
 //   node connect.mjs --url __HUB_URL__ [--agents codex] [--name agent-hub-cloud] [--profile cloud] [--no-otel] [--dry-run]
+//   node connect.mjs --remove agent-hub-local [--profile local] [--dry-run]   删除各 Agent 里这个名称的 MCP（云端唯一后清理本地 Hub）
 // 令牌优先通过 AGENT_HUB_TOKEN 环境变量提供；--profile 将脚本凭据保存到独立的 <profile>.env。
 // 做四件事：
 //   1. 写入 ~/.config/agent-hub/env（仓库里的 hub.sh 从这里读地址和令牌，权限 600）
@@ -22,6 +23,7 @@ const DRY = flag("dry-run");
 const OTEL = !flag("no-otel");
 const SERVER_NAME = opt("name", "agent-hub");
 const PROFILE = opt("profile", "");
+const REMOVE = opt("remove", "");
 let URL_ = (opt("url", process.env.AGENT_HUB_URL || "__HUB_URL__") || "").replace(/\/+$/, "");
 let TOKEN = opt("token", process.env.AGENT_HUB_TOKEN || "");
 const CF_ID = opt("access-client-id", process.env.CF_ACCESS_CLIENT_ID || "");
@@ -134,8 +136,51 @@ const AGENTS = {
   },
 };
 
+// 删除某个名称的 MCP 注册：只改包含它的文件，改前备份；不需要连接 hub
+function dropJson(p, key, label) {
+  if (!exists(p)) return;
+  let obj;
+  try { obj = JSON.parse(fs.readFileSync(p, "utf8") || "{}"); } catch { log(`  ! ${label}：${p} 不是纯 JSON（可能有注释），请手动删除 ${REMOVE}`); return; }
+  if (!obj || !obj[key] || !Object.prototype.hasOwnProperty.call(obj[key], REMOVE)) return;
+  delete obj[key][REMOVE];
+  writeFile(p, JSON.stringify(obj, null, 2) + "\n");
+  done.push([label + " 已移除", p]);
+}
+const REMOVERS = {
+  claude() {
+    if (which("claude")) {
+      try { if (!DRY) execFileSync("claude", ["mcp", "remove", REMOVE, "-s", "user"], { stdio: "ignore" }); done.push(["Claude Code MCP 已移除", "claude mcp（用户级）"]); } catch { /* 用户级没有这个名称 */ }
+    }
+    dropJson(path.join(HOME, ".claude.json"), "mcpServers", "Claude Code MCP");
+  },
+  codex() {
+    const p = path.join(HOME, ".codex/config.toml"); if (!exists(p)) return;
+    const t = fs.readFileSync(p, "utf8"); const n = removeTomlTable(t, "mcp_servers." + REMOVE);
+    if (n !== t) { writeFile(p, n.replace(/\n*$/, "\n")); done.push(["Codex MCP 已移除", p]); }
+  },
+  cursor() { dropJson(path.join(HOME, ".cursor/mcp.json"), "mcpServers", "Cursor MCP"); },
+  vscode() { dropJson(path.join(vscodeUserDir(), "mcp.json"), "servers", "VS Code MCP"); },
+  copilot() { dropJson(path.join(HOME, ".copilot/mcp-config.json"), "mcpServers", "Copilot CLI MCP"); },
+  kiro() { dropJson(path.join(HOME, ".kiro/settings/mcp.json"), "mcpServers", "Kiro MCP"); },
+  "claude-desktop"() { dropJson(claudeDesktopConfig(), "mcpServers", "Claude 桌面版 MCP"); },
+};
+function removeMode() {
+  log(`删除名为「${REMOVE}」的 agent-hub MCP 注册${DRY ? "（dry-run，不会改任何文件）" : ""}`);
+  const want = opt("agents", "");
+  const list = want ? want.split(",").map((x) => x.trim()).filter(Boolean) : Object.keys(REMOVERS);
+  for (const k of list) { if (!REMOVERS[k]) { log("  ? 未知 Agent：" + k); continue; } try { REMOVERS[k](); } catch (e) { log(`  ! ${k}：${e.message}`); } }
+  if (PROFILE) {
+    const f = path.join(HOME, ".config/agent-hub", PROFILE + ".env");
+    if (exists(f)) { if (DRY) log("  [dry-run] 将删除 " + f); else { backup(f); fs.rmSync(f); } done.push(["连接配置已删除（有备份）", f]); }
+  }
+  log(done.length ? "\n已完成：" : "没有找到需要删除的配置。");
+  done.forEach(([l, p]) => log(`  ${l.padEnd(22)} ${p}`));
+  log(`\n提醒：重启已打开的 Agent 才会生效；~/.codex/config.toml 的 [otel] 或 ~/.claude/settings.json 里的遥测地址如果还指向旧 Hub，请改成云端。`);
+}
+
 async function main() {
-  if (!/^[A-Za-z0-9_-]+$/.test(SERVER_NAME) || (PROFILE && !/^[A-Za-z0-9_-]+$/.test(PROFILE))) { console.error("--name / --profile 只能包含字母、数字、下划线与连字符"); process.exit(1); }
+  if (!/^[A-Za-z0-9_-]+$/.test(SERVER_NAME) || (PROFILE && !/^[A-Za-z0-9_-]+$/.test(PROFILE)) || (REMOVE && !/^[A-Za-z0-9_-]+$/.test(REMOVE))) { console.error("--name / --profile / --remove 只能包含字母、数字、下划线与连字符"); process.exit(1); }
+  if (REMOVE) { removeMode(); return; }
   if (!!CF_ID !== !!CF_SECRET) { console.error("Access Client ID 与 Secret 必须同时提供"); process.exit(1); }
   if (!URL_ || URL_.includes("__HUB" + "_URL__")) { console.error("缺少 --url，例如 --url http://127.0.0.1:8787"); process.exit(1); }
   if (!TOKEN) {

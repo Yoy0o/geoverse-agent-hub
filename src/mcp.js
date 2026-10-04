@@ -9,6 +9,8 @@ import {
 } from "./domain.js";
 import { markChannel } from "./ingest.js";
 import { config } from "#hub/config";
+import { startRun, touchFromEvent, reportProgress, dispatch, cancelRun, runsView, runnersView, RUN_ACTIVE, RUN_LABEL, MODE_LABEL } from "./exec.js";
+import { retiredTo, retiredHint } from "./retire.js";
 
 const text = (s) => ({ content: [{ type: "text", text: String(s) }] });
 const json = (o) => text(JSON.stringify(o, null, 2));
@@ -17,12 +19,21 @@ const line = (t) => `${t.id} · ${t.status} · ${t.risk || "-"} · ${t.project |
 
 function build(agent) {
   const server = new McpServer({ name: "agent-hub", version: config.version }, {
-    instructions: "agent-hub 是研发任务工作台。执行任务时：开始先调用 get_task 读取任务单（任务编号在分支名 agent/<编号>-… 或 specs/<编号>.md 里），按验收标准和允许修改的范围工作；结束时调用 submit_receipt 提交交付回执。人问“今天要处理什么”时调用 today。",
+    instructions: "agent-hub 是研发任务工作台。执行任务时：开始先调用 start_task（或 get_task）读取任务单（任务编号在分支名 agent/<编号>-… 或 specs/<编号>.md 里），按验收标准和允许修改的范围工作；阶段性进展用 report_progress 汇报；结束时调用 submit_receipt 提交交付回执。在云端会话里执行时，start_task 传 location=cloud。人问“今天要处理什么”时调用 today；问任务在哪里执行、做到哪一步时调用 list_runs。",
   });
+  // 已停用的 Hub：只读工具照常可用，写工具返回切换到云端的提示
+  const retired = retiredTo();
+  if (retired) {
+    const reg = server.registerTool.bind(server);
+    server.registerTool = (name, def, fn) => reg(name, def, def.annotations && def.annotations.readOnlyHint ? fn : async () => err(retiredHint(retired)));
+  }
   const log = (tool, taskId, summary) => {
     markChannel(agent, "mcp");
     addEvent({ agent, kind: "mcp", raw: tool, task: taskId || null, summary: summary || "MCP " + tool });
+    // 执行中的任务：MCP 调用也算一次心跳
+    if (taskId) { try { touchFromEvent(getTask(taskId), { kind: "mcp", agent }); } catch (e) { console.error("[exec]", e && e.message); } }
   };
+  const runLine = (r) => `${r.id} · ${r.task} · ${RUN_LABEL[r.health] || RUN_LABEL[r.status] || r.status} · ${r.location === "cloud" ? "云端" : "本机"}${r.runnerName || r.host ? "（" + (r.runnerName || r.host) + "）" : ""} · ${MODE_LABEL[r.mode] || r.mode}${r.agent ? " · " + r.agent : ""}${r.progress != null ? " · " + r.progress + "%" : ""}${r.step ? " · " + r.step : ""}`;
 
   server.registerTool("today", {
     title: "今日待办", description: "需要人处理的任务（需介入、待评审、超预算）、待写入规则数，以及近 7 天指标。",
@@ -31,7 +42,8 @@ function build(agent) {
     const ts = allTasks(); const now = new Date();
     const m = metrics(ts, new Date(now - 7 * 86400000), new Date(now.getTime() + 1));
     log("today");
-    return json({ attention: attention(ts), pendingRules: allRules().filter((r) => r.status === "待写入").length, open: ts.filter((t) => OPEN.includes(t.status)).length, last7d: m });
+    const running = runsView({ statuses: RUN_ACTIVE, limit: 50 }).map((r) => ({ run: r.id, task: r.task, status: RUN_LABEL[r.health] || r.status, where: (r.location === "cloud" ? "云端" : "本机") + (r.runnerName || r.host ? " · " + (r.runnerName || r.host) : ""), agent: r.agent, progress: r.progress, step: r.step, heartbeatAt: r.heartbeatAt }));
+    return json({ attention: attention(ts), running, pendingRules: allRules().filter((r) => r.status === "待写入").length, open: ts.filter((t) => OPEN.includes(t.status)).length, last7d: m });
   });
 
   server.registerTool("list_tasks", {
@@ -99,14 +111,64 @@ function build(agent) {
   });
 
   server.registerTool("start_task", {
-    title: "开始执行", description: "把任务标记为执行中并返回任务单。Agent 开工时调用。",
-    inputSchema: { id: z.string(), branch: z.string().optional(), session: z.string().optional() },
+    title: "开始执行", description: "把任务标记为执行中、登记执行位置（本机 / 云端），返回任务单。Agent 开工时调用。",
+    inputSchema: {
+      id: z.string(), branch: z.string().optional(), session: z.string().optional(),
+      location: z.enum(["local", "cloud"]).optional().describe("在哪里执行：本机为 local；Claude Code 网页版、Codex 云端、Copilot 云端 Agent 等为 cloud"),
+      host: z.string().optional().describe("机器名或云端环境名"),
+    },
   }, async (a) => {
     const t = getTask(a.id); if (!t) return err("找不到任务 " + a.id);
     const extra = { agent: t.agent || agentName(agent), branch: t.branch || a.branch || "", session: t.session || a.session || "" };
     if (["待规格", "待执行", "需介入"].includes(t.status)) moveTask(t, "执行中", extra, agent); else patchTask(t.id, extra, agent);
-    log("start_task", a.id, "开始执行");
-    return text(taskBrief(getTask(a.id)));
+    const run = startRun(getTask(a.id), { location: a.location || (agent === "claude-ai" ? "cloud" : "local"), host: a.host, agent, branch: a.branch, session: a.session }, agent);
+    log("start_task", a.id, "开始执行（" + (run.location === "cloud" ? "云端" : "本机") + "）");
+    return text(taskBrief(getTask(a.id)) + `\n\n---\n执行记录：${run.id}（${run.location === "cloud" ? "云端" : "本机"}）。阶段性进展请调用 report_progress。`);
+  });
+
+  server.registerTool("report_progress", {
+    title: "汇报进度", description: "执行过程中汇报进度：百分比、当前步骤、完成的验收标准。工作台和手机上能实时看到。",
+    inputSchema: {
+      task: z.string().describe("任务编号"), progress: z.number().min(0).max(100).optional().describe("0–100"),
+      step: z.string().optional().describe("当前步骤，如“实现导出接口”“补测试”"), note: z.string().optional(),
+      acceptance_done: z.array(z.number().int().min(0)).optional().describe("已完成的验收标准序号（从 0 开始）"),
+    },
+  }, async (a) => {
+    const t = getTask(a.task); if (!t) return err("找不到任务 " + a.task);
+    const run = reportProgress(t, { progress: a.progress, step: a.step, note: a.note, acceptance: a.acceptance_done }, agent);
+    markChannel(agent, "mcp");
+    return text(`已记录：${t.id} ${run.progress != null ? run.progress + "%" : ""}${run.step ? " · " + run.step : ""}`);
+  });
+
+  server.registerTool("dispatch_task", {
+    title: "派发任务", description: "把任务派发给执行端（某台登记过的电脑 / 云端 VM），或生成交给云端 Agent 的开工提示词。mode：exec=执行端自动启动 Agent，prepare=只准备分支和工作区，handoff=返回提示词交给云端 Agent。",
+    inputSchema: {
+      id: z.string(), mode: z.enum(["exec", "prepare", "handoff"]).optional(), runner: z.string().optional().describe("执行端编号（list_runs 可查）；不填 = 任一登记了该项目的执行端"),
+      agent: z.string().optional().describe("claude-code / codex / gemini 等"), note: z.string().optional(), force: z.boolean().optional().describe("替换当前进行中的执行"),
+    },
+  }, async (a) => {
+    const t = getTask(a.id); if (!t) return err("找不到任务 " + a.id);
+    try {
+      const r = dispatch(t, { mode: a.mode, runner: a.runner, agent: a.agent, note: a.note, force: a.force }, agent);
+      markChannel(agent, "mcp");
+      return text(`已派发：${runLine(r.run)}` + (r.run.mode === "handoff" ? "\n\n把下面这段交给云端 Agent：\n" + r.prompt : ""));
+    } catch (e) { return err(e.message); }
+  });
+
+  server.registerTool("list_runs", {
+    title: "执行情况", description: "任务在哪里执行、做到哪一步、是否停滞：进行中的执行记录和执行端（电脑 / 云端）在线状态；传 task 看某个任务的全部执行尝试。",
+    inputSchema: { task: z.string().optional(), include_ended: z.boolean().optional() }, annotations: { readOnlyHint: true },
+  }, async (a) => {
+    const runs = runsView(a.task ? { task: a.task, limit: 50 } : a.include_ended ? { limit: 50 } : { statuses: RUN_ACTIVE, limit: 100 });
+    const runners = runnersView();
+    markChannel(agent, "mcp");
+    return text("执行记录：\n" + (runs.map(runLine).join("\n") || "（无）") + "\n\n执行端：\n" + (runners.map((r) => `${r.id} · ${r.name} · ${r.online ? "在线" : "离线"} · ${r.kind === "local" ? "本机" : r.kind === "ci" ? "CI" : "云端"} · ${r.mode === "exec" ? "可自动执行" : "只准备工作区"} · 项目 ${r.projects.join("、") || "—"} · Agent ${r.agents.join("、") || "—"} · 进行中 ${r.active}`).join("\n") || "（还没有登记执行端：在电脑上运行 runner.mjs register）"));
+  });
+
+  server.registerTool("cancel_run", {
+    title: "取消执行", description: "取消一次排队或进行中的执行（执行端会停止它启动的 Agent 进程）。", inputSchema: { run: z.string() },
+  }, async (a) => {
+    try { const r = cancelRun(a.run, agent); markChannel(agent, "mcp"); return text("已处理：" + runLine(r)); } catch (e) { return err(e.message); }
   });
 
   server.registerTool("submit_receipt", {

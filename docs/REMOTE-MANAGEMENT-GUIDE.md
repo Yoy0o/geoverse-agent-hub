@@ -2,6 +2,8 @@
 
 适用于 Cloudflare 上的个人 Hub。这里的“远程”指任务数据与管理网页在云端；当前电脑上的 Agent、源码和命令仍在本机运行。核对日期：2026-09-30。
 
+> **2026-10-03 起这是唯一的 Hub（云端唯一）。** 迁移完成后，这台电脑的默认连接（`~/.config/agent-hub/env`）就是云端，脚本不再需要设置 `AGENT_HUB_CONFIG`，MCP 只保留 `agent-hub-cloud`。迁移步骤、断网暂存补发和备份见 [云端唯一：迁移与日常](CLOUD-ONLY.md)；下文第 5 节的 profile 切换只在迁移前需要。
+
 ## 1. 当前入口与本机登记
 
 | 项目 | 当前配置 |
@@ -54,7 +56,16 @@ Client ID 是标识符，Client Secret、HUB_TOKEN 是密钥。不要把 Client 
 
 新任务用 `create_task` 登记，开始用 `start_task`，完成用 `submit_receipt` 上报实际验证结果，再由本人评审。MCP 的状态记录不会自动创建 Git 分支、修改文件或合并代码；需要本地 worktree 时使用项目接入包的 `task.sh`。
 
-不要让同一项工作同时向两个 Hub 新建同名任务并期待同步。通常选择云端作为多设备任务管理来源，本地 Hub 用于离线记录或独立实验；切换管理来源需明确记录。
+推荐把云端 Hub 作为多设备的控制面：执行端（`runner.mjs --profile cloud`）连云端，手机上就能派发任务、看执行进度、评审；本地 Hub 可选，在本地 `.env` 配置 `HUB_SYNC_*` 后与云端双向同步，断网时继续用。没有配置同步时两端数据各自独立，不要在两边分别新建同一项工作。见[执行管理与多端同步](EXECUTION-AND-SYNC.md)。
+
+把任务交给不在身边的电脑：
+
+```powershell
+node kit/runner.mjs register --profile cloud --name "DIY-Liu 工作站" --project geoverse-agent-hub=D:/workspace/geoverse-agent-hub --agents codex
+node kit/runner.mjs start --profile cloud
+```
+
+之后在云端网页任务详情点“派发执行”。交给 Claude Code 网页版等云端 Agent 时选“交给云端 Agent”，把提示词发过去，Agent 运行 `task.sh attach <任务编号>` 后这里显示“云端 · 执行中”。
 
 ## 5. 脚本切换到云端
 
@@ -101,7 +112,7 @@ node kit/connect.mjs --url https://geoverse-agent-hub.libra-liuyb.workers.dev --
 
 网页“导出与设置”导出业务 JSON，保存到私有备份位置。JSON 不含完整事件、Agent 会话或网页登录状态；完整数据库恢复需核对 SQLite DO 的 PITR 能力。代码回滚不等于数据回滚。
 
-需要从已有本地 Hub 迁移时，先导出本地 JSON，再在云端恢复并核对项目/任务/规则/复盘。恢复是导入覆盖同 ID 文档，没有持续双向同步或冲突合并；先备份两端，确认管理来源。
+需要从已有本地 Hub 迁移时，先导出本地 JSON，再在云端恢复并核对项目/任务/规则/复盘。恢复是导入覆盖同 ID 文档；需要持续保持一致时改用多端同步（两端都改过的文档按规则合并并记录冲突）。无论哪种方式都先备份两端。
 
 `node src/cli.js token/export/import/stats` 操作执行环境的本地数据库，**不会因为设置云端 URL 就操作 Durable Object**。云端业务管理使用网页、MCP 或经认证的 HTTP API；不要用宿主机 CLI 导入云端数据。
 

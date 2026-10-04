@@ -2,6 +2,7 @@
 import { addEvent, touchSession, bumpSession, getSession, sessionsForTask, kv } from "#hub/db";
 import { config } from "#hub/config";
 import { TASK_ID_RE, AGENT_NAMES, agentName, getTask, moveTask, patchTask, findReceipt, applyReceipt, ensureAgentListed, taskBrief } from "./domain.js";
+import { touchFromEvent } from "./exec.js";
 
 const lc = (s) => String(s || "").toLowerCase().replace(/[^a-z]/g, "");
 const EDIT_TOOLS = /^(edit|write|multiedit|apply_?patch|create|str_?replace(_editor)?|fs_?write|notebookedit|delete|writefile|editfile)$/i;
@@ -94,7 +95,7 @@ function payloadForStore(p, x) {
 
 /**
  * 接收一条 Agent 事件。
- * @param {object} o {agent, event, payload, text, query:{task,branch,repo,cwd}, channel}
+ * @param {object} o {agent, event, payload, text, query:{task,branch,repo,cwd,run,runner,location,host}, channel}
  * @returns {{event, task, context}} context 为需要注入给 Agent 的任务单（仅会话开始时）
  */
 export function ingest(o) {
@@ -109,7 +110,7 @@ export function ingest(o) {
   const repo = repoOf(q, x.cwd);
   const task = resolveTask({ hint: q.task, branch: q.branch, cwd: x.cwd, session: x.session });
   const display = agentName(agent);
-  const at = new Date().toISOString();
+  const at = q.at || new Date().toISOString();
 
   markChannel(agent, o.channel || "hooks");
   if (x.session) {
@@ -137,6 +138,11 @@ export function ingest(o) {
     if (AGENT_NAMES[agent] && !["git", "task-sh", "human"].includes(agent)) ensureAgentListed(display);
     if (!/^resume$/i.test(x.source)) context = contextFor(t);
   }
+  // 执行记录：心跳、当前步骤、在哪台机器 / 哪个云端会话上执行
+  if (t) {
+    try { touchFromEvent(t, { kind, run: q.run, runner: q.runner, location: q.location, host: q.host, agent, session: x.session, branch: q.branch, cwd: x.cwd, summary: o.summary, at: q.at }); }
+    catch (e) { console.error("[exec]", e && e.message); }
+  }
 
   // 回执：从一轮结束的消息、回复、会话记录尾部里找
   let receipt = null;
@@ -153,7 +159,7 @@ export function ingest(o) {
   }
 
   if (kind === "transcript" && !receiptResult) return { event: null, task: t, context };
-  const ev = addEvent({ agent, kind, raw: o.event || "", task: t ? t.id : null, session: x.session, repo, branch: q.branch || "", summary: o.summary || summarize(kind, x, q.reason), data: payloadForStore(o.payload, x) });
+  const ev = addEvent({ at: q.at || undefined, agent, kind, raw: o.event || "", task: t ? t.id : null, session: x.session, repo, branch: q.branch || "", summary: o.summary || summarize(kind, x, q.reason), data: payloadForStore(o.payload, x) });
   return { event: ev, task: t, context, receipt: receiptResult };
 }
 
