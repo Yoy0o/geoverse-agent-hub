@@ -19,12 +19,14 @@ export function agentsMd(p) {
   L.push("- 不读取、不输出、不提交 .env、密钥、证书等敏感文件", "- 不通过修改或删除测试让检查变绿", "");
   L.push("## 任务与 agent-hub",
     "- 每个任务在独立分支 `agent/<任务编号>-<简述>` 和独立 worktree 中进行；不要切换、合并或删除分支",
-    "- 任务单在 `specs/<任务编号>.md`（task.sh start 自动写入；会话开始时钩子也会注入）。能用 agent-hub MCP 时，可以用 `get_task` 读取最新任务单",
+    "- 任务单在 `specs/<任务编号>.md`（task.sh start 自动写入；会话开始时钩子也会注入）。能用 agent-hub MCP 时，优先用 `get_work_context` 读取当前结论、关联工作和任务单；旧 Hub 可回退到 `get_task`",
     "- 按任务单的验收标准和“允许修改”范围工作；需要改范围外的文件时先停下来说明",
     "- 需要人决定的问题：结束本轮，在回执里写 `status: blocked` 并说明",
     "- 阶段性进展用 `bash scripts/agent/hub.sh progress <0-100> \"<当前步骤>\"` 汇报（能用 agent-hub MCP 时用 `report_progress`），工作台和手机上实时可见",
     "- 提交信息末尾带 `Task: <任务编号>`（git 钩子会自动补上）",
-    "- 结束时：运行统一验证 → 输出交付回执 → 能用 agent-hub MCP 时调用 `submit_receipt` 提交同样内容", "");
+    "- 结束时：运行统一验证 → 输出交付回执 → 能用 agent-hub MCP 时调用 `submit_receipt` 提交同样内容",
+    "- 回执提交后重新读取 `get_work_context`，再用 `update_work_brief` 更新短结论、下一步、必要决策与已有任务关联；使用返回的 expectedFingerprint，保留仍有效的 content 字段",
+    "- 给人的默认说明只包含本次变化、对已完成工作的影响、需要决定什么和一个推荐动作；完整依据按需展开。读取不代表已读，采纳建议不代表验收完成", "");
   const rs = relevantRules(p.name); if (rs.length) { L.push("## 规则（来自工作台规则库）"); rs.forEach((r) => L.push("- " + r.text)); L.push(""); }
   L.push(RECEIPT_TEMPLATE, "");
   return L.join("\n");

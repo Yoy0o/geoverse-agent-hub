@@ -17,7 +17,8 @@
     "types:cloudflare": "wrangler types .cloudflare/worker-configuration.d.ts",
     "test:security": "node --test test/security.test.mjs",
     "test:connect": "node --test test/connect.test.mjs",
-    "test:unit": "node --test test/merge.test.mjs test/store.test.mjs test/runner.test.mjs",
+    "test:unit": "node --test test/merge.test.mjs test/store.test.mjs test/runner.test.mjs test/focus.test.mjs test/focus-api.test.mjs",
+    "test:focus": "node --test test/focus.test.mjs test/focus-api.test.mjs",
     "test:cloudflare": "node test/cloudflare.mjs"
   },
   "dependencies": {

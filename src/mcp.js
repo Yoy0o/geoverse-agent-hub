@@ -2,7 +2,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { setDoc, updateDoc, addEvent, sessionsForTask } from "#hub/db";
+import { getDoc, listDocs, setDoc, updateDoc, transaction, addEvent, sessionsForTask } from "#hub/db";
+import { createFocusService, briefShape, fingerprintSchema } from "./focus.js";
 import {
   STATUSES, OPEN, RISKS, REASONS, TARGETS, agentName, getTask, allTasks, allRules, getConfig, projByName, newTaskId, newTaskDoc,
   moveTask, patchTask, reviewTask, applyReceipt, normReceipt, taskBrief, relevantRules, attention, metrics,
@@ -16,10 +17,11 @@ const text = (s) => ({ content: [{ type: "text", text: String(s) }] });
 const json = (o) => text(JSON.stringify(o, null, 2));
 const err = (s) => ({ content: [{ type: "text", text: String(s) }], isError: true });
 const line = (t) => `${t.id} · ${t.status} · ${t.risk || "-"} · ${t.project || "未指定项目"} · ${t.agent || "未指定 Agent"} · ${t.title || "(未命名)"}`;
+const focus = createFocusService({ getDoc, listDocs, updateDoc, transaction }, attention);
 
 function build(agent) {
   const server = new McpServer({ name: "agent-hub", version: config.version }, {
-    instructions: "agent-hub 是研发任务工作台。执行任务时：开始先调用 start_task（或 get_task）读取任务单（任务编号在分支名 agent/<编号>-… 或 specs/<编号>.md 里），按验收标准和允许修改的范围工作；阶段性进展用 report_progress 汇报；结束时调用 submit_receipt 提交交付回执。在云端会话里执行时，start_task 传 location=cloud。人问“今天要处理什么”时调用 today；问任务在哪里执行、做到哪一步时调用 list_runs。",
+    instructions: "agent-hub 是研发任务工作台。人问今天需要判断什么时优先调用 get_focus，默认只说明变化、影响和推荐动作，细节按需展开。开工用 get_work_context 读取已有结论、关联工作与任务单，再用 start_task 登记执行。按验收标准和允许范围工作，进展用 report_progress。结束时 submit_receipt 提交真实验证结果，再读取当前上下文，用 update_work_brief 更新短摘要、下一步、必要的决策和已有任务关联。不得虚构验证或仅凭相似标题关联任务。读取不代表已读，采纳建议不代表任务完成。在云端执行时 start_task 传 location=cloud；执行位置和心跳用 list_runs。",
   });
   // 已停用的 Hub：只读工具照常可用，写工具返回切换到云端的提示
   const retired = retiredTo();
@@ -34,6 +36,33 @@ function build(agent) {
     if (taskId) { try { touchFromEvent(getTask(taskId), { kind: "mcp", agent }); } catch (e) { console.error("[exec]", e && e.message); } }
   };
   const runLine = (r) => `${r.id} · ${r.task} · ${RUN_LABEL[r.health] || RUN_LABEL[r.status] || r.status} · ${r.location === "cloud" ? "云端" : "本机"}${r.runnerName || r.host ? "（" + (r.runnerName || r.host) + "）" : ""} · ${MODE_LABEL[r.mode] || r.mode}${r.agent ? " · " + r.agent : ""}${r.progress != null ? " · " + r.progress + "%" : ""}${r.step ? " · " + r.step : ""}`;
+
+  server.registerTool("get_focus", {
+    title: "需要我判断什么", description: "精简的今日入口：优先三项待处理工作，阻塞、验证失败和风险全部保留。普通变化返回数量与最多十项索引，按需读取 get_work_context。不会标记已读。",
+    inputSchema: {}, annotations: { readOnlyHint: true },
+  }, async () => {
+    const result = focus.list();
+    log("get_focus");
+    return json({ counts: result.counts, items: result.items.map((v) => ({ id: v.id, title: v.title, reason: v.reason,
+      conclusion: v.snapshot.summary, decision: v.needsDecision ? v.snapshot.decision : "", recommendation: v.snapshot.recommendation,
+      nextAction: v.snapshot.nextAction, risk: v.snapshot.risk, changed: v.changes.map((c) => c.label), relatedTasks: v.snapshot.relations.map((r) => ({ id: r.taskId, type: r.type, note: r.note, status: r.status })) })),
+      remaining: result.remaining.map((v) => ({ id: v.id, title: v.title })),
+      updates: result.updates.slice(0, 10).map((v) => ({ id: v.id, title: v.title })) });
+  });
+  server.registerTool("get_work_context", {
+    title: "读取可续接上下文", description: "读取当前结论、相对上次已读的变化、关联工作、依据和完整任务单。返回 expectedFingerprint；更新前需以最新指纹为依据。",
+    inputSchema: { id: z.string() }, annotations: { readOnlyHint: true },
+  }, async ({ id }) => {
+    try { const v = focus.context(id); log("get_work_context", id); return json({ context: v.brief, expectedFingerprint: v.fingerprint, content: v.content, changes: v.changes, taskBrief: taskBrief(getTask(id)) }); }
+    catch (e) { if (e.expose) return err(e.message); throw e; }
+  });
+  server.registerTool("update_work_brief", {
+    title: "更新简短工作摘要", description: "更新同一份当前结论，避免新增长总结。填写短结论、下一步、必要的决策和推荐动作；证据/关系需可核查。content 是完整替换，请保留仍有效的字段。不更新已读或任务状态。",
+    inputSchema: { id: z.string(), expectedFingerprint: fingerprintSchema, content: z.object(briefShape).strict() },
+  }, async ({ id, ...input }) => {
+    try { const v = focus.update(id, input, agent); log("update_work_brief", id, "更新工作摘要"); return json({ id, expectedFingerprint: v.fingerprint, unread: v.unread, needsDecision: v.needsDecision }); }
+    catch (e) { if (e.expose) return err(e.message); throw e; }
+  });
 
   server.registerTool("today", {
     title: "今日待办", description: "需要人处理的任务（需介入、待评审、超预算）、待写入规则数，以及近 7 天指标。",

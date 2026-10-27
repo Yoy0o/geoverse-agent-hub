@@ -266,6 +266,7 @@ details.more summary{cursor:pointer;font-size:14px;font-weight:500}
 @keyframes skel{0%{background-position:200% 0}100%{background-position:-200% 0}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
+<link rel="stylesheet" href="/focus.css">
 </head><body>
 <header class="bar"><div class="wrap">
   <div class="brand"><h1>Agent 工作台</h1><span id="hubtag"></span><span class="sub">多 Agent 任务 · 执行 · 评审 · 规则沉淀</span></div>
@@ -278,6 +279,7 @@ details.more summary{cursor:pointer;font-size:14px;font-weight:500}
 
 <script src="/vendor/jszip.min.js"></script>
 <script src="/shim.js"></script>
+<script src="/focus.js"></script>
 <script>
 (function(){
 "use strict";
@@ -446,8 +448,9 @@ function withPreserved(root, preserve, fn){
   let sel = null; try { if (act && a.selectionStart!=null) sel = [a.selectionStart, a.selectionEnd]; } catch(e){}
   const scrollers = $$("[data-keep-scroll]", root).map(el=>[el.dataset.keepScroll, el.scrollTop, el.scrollLeft]);
   const opened = $$("details", root).map(el=>el.open);
+  const openedById = new Map($$("details[id]", root).map(el=>[el.id, el.open]));
   fn();
-  const ds = $$("details", root); if (ds.length === opened.length) ds.forEach((el,i)=>{ el.open = opened[i]; });
+  const ds = $$("details", root); ds.forEach((el,i)=>{ if(el.id && openedById.has(el.id)) el.open = openedById.get(el.id); else if(!el.id && ds.length === opened.length) el.open = opened[i]; });
   Object.entries(vals).forEach(([id,s]) => { const el = document.getElementById(id); if (!el || !root.contains(el)) return; if ("c" in s) el.checked = s.c; else if (el.value !== s.v) el.value = s.v; });
   scrollers.forEach(([k,t,l])=>{ const el=root.querySelector('[data-keep-scroll="'+k+'"]'); if(el){ el.scrollTop=t; el.scrollLeft=l; } });
   if (act) { const el = document.getElementById(act); if (el) { el.focus({preventScroll:true}); if (sel && el.setSelectionRange) try { el.setSelectionRange(sel[0], sel[1]); } catch(e){} } }
@@ -488,6 +491,9 @@ function sampleBadge(t){ return t.sample ? '<span class="pill tagx">示例</span
 
 /* ---------- view: today ---------- */
 function viewToday(){
+  return focusUI.today() + '<details class="more focus-statistics" id="focus-legacy-statistics"><summary>执行统计、规则与活动记录</summary>' + viewStatistics() + '</details>';
+}
+function viewStatistics(){
   if (!S.loaded.tasks && S.mode==="loading") return '<div class="empty">正在加载…</div>';
   const now = new Date(); const s = new Date(now.getTime()-7*86400000);
   const m = metrics(S.tasks, s, new Date(now.getTime()+1));
@@ -834,6 +840,7 @@ function drawerHtml(t){
   '<div class="db" data-keep-scroll="drawer">'+
     (S.reviewMode ? reviewPanel(t) : "")+
     execSection(t)+
+    focusUI.drawer(t.id)+
     '<div class="sec"><div class="row c3">'+
       '<label class="f"><span>项目</span><select id="d-project" data-f="project">'+projectOptions(t.project||"")+'</select></label>'+
       '<label class="f"><span>Agent</span><select id="d-agent" data-f="agent">'+agentOptions(t.agent||"")+'</select></label>'+
@@ -1048,7 +1055,7 @@ function closeDrawer(){
 }
 const A = {
   tab(el){ S.tab = el.dataset.k; S.openId = null; S.reviewMode = null; S.dispatch = null; try{ localStorage.setItem("awb.tab", S.tab); }catch(e){} if (S.tab==="agents") refreshStatus(); if (S.tab==="exec") loadExec(); if (S.tab==="export") loadSync(); render(); window.scrollTo(0,0); },
-  open(el){ const was = S.openId; S.openId = el.dataset.id; S.reviewMode = null; S.reviewSel = []; S.dispatch = null; loadActivity(S.openId); loadTaskRuns(S.openId); render(); if (!was) focusDrawer(); },
+  open(el){ const was = S.openId; S.openId = el.dataset.id; S.reviewMode = null; S.reviewSel = []; S.dispatch = null; loadActivity(S.openId); loadTaskRuns(S.openId); focusUI.invalidate(); render(); if (!was) focusDrawer(); },
   "new-task"(){ S.tab = "capture"; S.openId = null; S.reviewMode = null; S.dispatch = null; try{ localStorage.setItem("awb.tab", S.tab); }catch(e){} render(); window.scrollTo(0,0); const el = $("#n-title"); if (el) el.focus(); },
   shortcuts(){ showShortcuts(); },
   "go-sync"(){ A.tab({dataset:{k:"export"}}); const el = $(".syncbox"); if (el) el.scrollIntoView({block:"start"}); },
@@ -1629,6 +1636,8 @@ function showShortcuts(){
 /* ---------- boot ---------- */
 const VIEWS = {today: viewToday, board: viewBoard, exec: viewExec, projects: viewProjects, agents: viewAgents, capture: viewCapture, rules: viewRules, retro: viewRetro, export: viewExport};
 let raf = 0; function scheduleRender(){ if (raf) return; raf = requestAnimationFrame(()=>{ raf = 0; render(); }); }
+const focusUI = window.createFocusUI({ request: (...args)=>window.hub.req(...args), changed: scheduleRender, toast, showText,
+  getTasks: ()=>S.tasks, currentTask: ()=>S.openId, relevant: ()=>S.tab==="today" || !!S.openId, connected: ()=>S.mode==="db" });
 function subErr(e){ if (e && e.code==="revoked"){ S.mode="local"; } scheduleRender(); }
 async function init(){
   render();
@@ -1638,7 +1647,7 @@ async function init(){
   S.cap.downloads = dl; S.cap.sample = sm;
   if (!db){ S.mode = "local"; render(); return; }
   S.cap.db = db; S.mode = "db";
-  db.collection("tasks").onSnapshot(s => { S.tasks = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.tasks = true; scheduleRender(); }, subErr);
+  db.collection("tasks").onSnapshot(s => { S.tasks = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.tasks = true; focusUI.invalidate(); scheduleRender(); }, subErr);
   db.collection("rules").onSnapshot(s => { S.rules = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.rules = true; scheduleRender(); }, subErr);
   db.collection("retros").onSnapshot(s => { const o = {}; s.docs.forEach(d=>{ o[d.id] = Object.assign({}, d.data(), {id:d.id}); }); S.retros = o; S.loaded.retros = true; scheduleRender(); }, subErr);
   db.doc("config/main").onSnapshot(d => { if (d.exists) S.config = normalizeConfig(d.data()); S.loaded.config = true; scheduleRender(); }, subErr);
@@ -1657,11 +1666,11 @@ async function init(){
   window.addEventListener("hub:run", e => onRun(e.detail));
   window.addEventListener("hub:runner", e => onRunner(e.detail));
   window.addEventListener("hub:sync", () => loadSync());
-  window.addEventListener("hub:reconnect", () => { loadExec(); loadSync(); });
+  window.addEventListener("hub:reconnect", () => { loadExec(); loadSync(); focusUI.invalidate(); });
   // 接入状态只在“接入”页、页面可见时刷新（避免后台标签页持续产生查询）
   setInterval(() => { if (S.tab==="agents" && !document.hidden) refreshStatus(); }, 60000);
   // 心跳、停滞、“几分钟前”都随时间变化：每 30 秒刷新一次（输入框内容和焦点会保留）
-  setInterval(() => { if (!document.hidden && !modalEl) scheduleRender(); }, 30000);
+  setInterval(() => { if (!document.hidden && !modalEl) { focusUI.invalidate(); scheduleRender(); } }, 30000);
   render();
 }
 init();
