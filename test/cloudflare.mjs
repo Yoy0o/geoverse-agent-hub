@@ -51,7 +51,7 @@ async function runOAuth() {
 try {
   await fs.mkdir(persist, { recursive: true });
   await start(false);
-  for (const p of ["/", "/shim.js", "/api/health", "/api/export", "/mcp"]) {
+  for (const p of ["/", "/shim.js", "/focus.js", "/focus.css", "/api/health", "/api/focus", "/api/export", "/mcp"]) {
     check((await call(p)).status === 401, `production Access gate protects ${p}`);
   }
   check((await call("/", { headers: { "Cf-Access-Authenticated-User-Email": "hio250@163.com", Authorization: "Bearer " + token } })).status === 401, "identity header plus Hub token cannot bypass Access");
@@ -89,8 +89,23 @@ try {
   check(status.agents.some(a => a.agent === "codex" && a.events24h > 0), "agent status uses the bounded time-index query in Durable Objects SQLite");
   const client = new Client({ name: "cloudflare-test", version: "1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(base + "/mcp"), { requestInit: { headers: { Authorization: "Bearer " + token } } }));
-  check((await client.listTools()).tools.length === 17, "MCP SDK initialization and tool listing work in workerd");
+  const toolNames = (await client.listTools()).tools.map(t => t.name).sort();
+  const expectedTools = ["today", "list_tasks", "get_task", "create_task", "update_task", "start_task", "report_progress", "dispatch_task", "list_runs", "cancel_run", "submit_receipt", "move_task", "list_rules", "add_rule", "get_project", "log_note", "task_usage", "get_focus", "get_work_context", "update_work_brief"].sort();
+  check(toolNames.length === expectedTools.length && expectedTools.every((name, i) => toolNames[i] === name), "MCP SDK initializes with the complete tool inventory in workerd");
   check((await client.callTool({ name: "get_task", arguments: { id } })).content[0].text.includes(id), "MCP reads shared SQLite task state");
+  const context = JSON.parse((await client.callTool({ name: "get_work_context", arguments: { id } })).content[0].text);
+  const brief = await client.callTool({ name: "update_work_brief", arguments: { id, expectedFingerprint: context.expectedFingerprint, content: { summary: "Durable work context", decision: "Proceed with the query?", recommendation: "Ship query first" } } });
+  check(!brief.isError, "MCP updates concise work context in Durable Objects");
+  const focusPath = `/api/tasks/${id}/focus`;
+  const work = await json(await api(focusPath));
+  check(work.snapshot.summary === "Durable work context" && work.unread && work.needsDecision, "REST reads the same work snapshot as MCP");
+  check((await api(focusPath + "/read", "POST", { expectedFingerprint: context.expectedFingerprint })).status === 409, "stale reading state is rejected in workerd");
+  const read = await json(await api(focusPath + "/read", "POST", { expectedFingerprint: work.fingerprint }));
+  check(!read.unread && read.needsDecision, "reading does not resolve a decision in Durable Objects");
+  const accepted = await json(await api(focusPath + "/decision", "POST", { expectedFingerprint: work.fingerprint, action: "accept" }));
+  check(!accepted.needsDecision && (await json(await api(`/api/tasks/${id}`))).status === "执行中", "accepting a recommendation never completes the task");
+  const daily = JSON.parse((await client.callTool({ name: "get_focus", arguments: {} })).content[0].text);
+  check(typeof daily.counts.attention === "number", "MCP daily focus executes in workerd");
   await client.callTool({ name: "report_progress", arguments: { task: id, progress: 40, step: "workerd fixture" } });
   check((await json(await api(`/api/tasks/${id}`))).exec.progress === 40, "MCP progress updates the execution summary in Durable Objects");
   await client.close();
@@ -118,6 +133,7 @@ try {
   check(/no-store/.test(exported.headers.get("cache-control")) && backup.tasks.some(t => t.id === id), "private backup is authenticated and cannot be cached");
   await json(await api("/api/import", "POST", backup));
   check((await json(await api(`/api/tasks/${id}`))).goal === "broadcast fixture", "transactional backup import preserves task fields");
+  check((await json(await api(focusPath))).content.summary === "Durable work context", "backup import preserves the work brief");
   await runOAuth();
   const login = await call("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) });
   const cookie = login.headers.get("set-cookie").split(";")[0];
@@ -125,6 +141,8 @@ try {
   await stop();
   await start(true);
   check((await json(await api(`/api/tasks/${id}`))).goal === "broadcast fixture", "SQLite data survives runtime restart");
+  const persistedWork = await json(await api(focusPath));
+  check(persistedWork.content.summary === "Durable work context" && persistedWork.readAt && persistedWork.resolution?.action === "accept", "work brief, reading state and decision survive runtime restart");
   check((await call("/api/tasks", { headers: { Cookie: cookie } })).status === 200, "stored browser session survives runtime restart");
   const logoutStream = await call("/api/stream", { headers: { Cookie: cookie } });
   const logoutReader = logoutStream.body.getReader();
