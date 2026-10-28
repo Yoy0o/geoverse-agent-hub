@@ -3,8 +3,9 @@ import { bus, validColl, validId, getDoc, listDocs, setDoc, updateDoc, deleteDoc
 import { config, hubBaseUrl } from "#hub/config";
 import {
   STATUSES, AGENT_NAMES, agentName, getTask, allTasks, getConfig, normalizeConfig, projByName, projByRepo, newTaskId, newTaskDoc, moveTask, patchTask,
-  reviewTask, applyReceipt, parseReceipt, findReceipt, normReceipt, taskBrief,
+  reviewTask, applyReceipt, parseReceipt, findReceipt, normReceipt, taskBrief, attention,
 } from "./domain.js";
+import { createFocusService } from "./focus.js";
 import { ingest, channels } from "./ingest.js";
 import { execMeta } from "./hooks.js";
 import {
@@ -23,6 +24,7 @@ const handle = (fn) => (req, res, next) => {
   catch (e) { if (e && e.expose) return res.status(e.status || 400).json({ error: e.message }); next(e); }
 };
 const taskOr404 = (id) => { const t = getTask(id); if (!t) throw Object.assign(new Error("找不到任务 " + id), { status: 404, expose: true }); return t; };
+const focus = createFocusService({ getDoc, listDocs, updateDoc, transaction }, attention);
 
 export function apiRoutes(app, auth) {
   app.get("/api/health", (req, res) => res.json({ ok: true, version: config.version, ...stats() }));
@@ -75,6 +77,12 @@ export function apiRoutes(app, auth) {
   });
 
   /* ---------- 任务（task.sh、脚本、网页共用） ---------- */
+  app.get("/api/focus", auth, handle((req) => focus.list({ limit: req.query.limit })));
+  app.get("/api/tasks/:id/focus/context", auth, handle((req) => focus.context(req.params.id)));
+  app.get("/api/tasks/:id/focus", auth, handle((req) => focus.get(req.params.id)));
+  app.put("/api/tasks/:id/focus", auth, handle((req) => focus.update(req.params.id, req.body, who(req))));
+  app.post("/api/tasks/:id/focus/read", auth, handle((req) => focus.markRead(req.params.id, req.body, who(req))));
+  app.post("/api/tasks/:id/focus/decision", auth, handle((req) => focus.decide(req.params.id, req.body, who(req))));
   app.get("/api/tasks", auth, (req, res) => {
     let ts = allTasks();
     const { status, project, agent } = req.query;

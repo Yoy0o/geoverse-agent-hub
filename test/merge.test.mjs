@@ -5,6 +5,15 @@ import { mergeTask, mergeConfig, resolveConflict } from "../src/merge.js";
 
 const h = (at, from, to) => ({ at, from, to });
 
+test("a newer read marker cannot overwrite another peer's newer work summary", () => {
+  const local = { status: "执行中", focus: { content: { summary: "New conclusion" }, updatedAt: "2026-10-27T10:00:00Z", read: { at: "2026-10-27T08:00:00Z", fingerprint: "old" } } };
+  const remote = { status: "执行中", focus: { content: { summary: "Old conclusion" }, updatedAt: "2026-10-27T09:00:00Z", read: { at: "2026-10-27T11:00:00Z", fingerprint: "read-on-other-device" }, decisionResolution: { at: "2026-10-27T11:01:00Z", action: "accept", fingerprint: "old" } } };
+  const merged = mergeTask(local, remote, "2026-10-27T10:00:00Z", "2026-10-27T11:01:00Z");
+  assert.equal(merged.focus.content.summary, "New conclusion");
+  assert.equal(merged.focus.read.fingerprint, "read-on-other-device");
+  assert.equal(merged.focus.decisionResolution.fingerprint, "old");
+});
+
 test("task merge keeps both histories and takes status from the latest transition", () => {
   const base = { title: "导出", history: [h("2026-10-01T00:00:00Z", "", "待执行")] };
   const local = { ...base, goal: "本端目标", updatedAt: "2026-10-01T10:00:00Z", status: "待评审", history: [...base.history, h("2026-10-01T09:00:00Z", "待执行", "执行中"), h("2026-10-01T10:00:00Z", "执行中", "待评审")], receipt: { summary: "本端回执", at: "2026-10-01T10:00:00Z" } };

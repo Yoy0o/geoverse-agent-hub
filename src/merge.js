@@ -20,6 +20,15 @@ export function mergeTask(local, remote, localAt, remoteAt) {
     const v = local[k] && remote[k] ? newer(local[k], remote[k]) : local[k] || remote[k];
     if (v) out[k] = v; else delete out[k];
   }
+  // 阅读进度不能用更晚的文档更新时间覆盖另一端更新过的工作摘要。
+  if (local.focus || remote.focus) {
+    const lf = local.focus || {}, rf = remote.focus || {};
+    out.focus = { ...newer(lf, rf, "updatedAt") };
+    for (const k of ["read", "decisionResolution"]) {
+      const value = lf[k] && rf[k] ? newer(lf[k], rf[k]) : lf[k] || rf[k];
+      if (value) out.focus[k] = value;
+    }
+  }
   // 用量来自各自收到的遥测：取会话更多、成本更高的一份
   const score = (u) => (u ? (u.sessions || 0) * 1e6 + (u.costUsd || 0) * 1e3 + (u.tokensIn || 0) / 1e6 : -1);
   const usageSide = score(local.usage) >= score(remote.usage) ? local : remote;
