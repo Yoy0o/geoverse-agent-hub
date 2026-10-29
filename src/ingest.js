@@ -3,6 +3,7 @@ import { addEvent, touchSession, bumpSession, getSession, sessionsForTask, kv } 
 import { config } from "#hub/config";
 import { TASK_ID_RE, AGENT_NAMES, agentName, getTask, moveTask, patchTask, findReceipt, applyReceipt, ensureAgentListed, taskBrief } from "./domain.js";
 import { touchFromEvent } from "./exec.js";
+import { receiveWorkBrief } from "./work-brief.js";
 
 const lc = (s) => String(s || "").toLowerCase().replace(/[^a-z]/g, "");
 const EDIT_TOOLS = /^(edit|write|multiedit|apply_?patch|create|str_?replace(_editor)?|fs_?write|notebookedit|delete|writefile|editfile)$/i;
@@ -136,7 +137,7 @@ export function ingest(o) {
       patchTask(t.id, { agent: t.agent || display, branch: t.branch || q.branch || "" }, agent);
     }
     if (AGENT_NAMES[agent] && !["git", "task-sh", "human"].includes(agent)) ensureAgentListed(display);
-    if (!/^resume$/i.test(x.source)) context = contextFor(t);
+    context = contextFor(t);
   }
   // 执行记录：心跳、当前步骤、在哪台机器 / 哪个云端会话上执行
   if (t) {
@@ -147,6 +148,16 @@ export function ingest(o) {
   // 回执：从一轮结束的消息、回复、会话记录尾部里找
   let receipt = null;
   const scan = o.text || x.text || (kind === "stop" || kind === "response" || kind === "spec.task" ? JSON.stringify(o.payload || {}) : "");
+  let workBrief = null;
+  if (scan && ["stop", "response", "transcript", "spec.task", "session.end"].includes(kind)) {
+    try { workBrief = receiveWorkBrief(scan, t?.id, agent); }
+    catch (e) {
+      if (!e.expose) throw e;
+      workBrief = { status: "rejected", error: e.message };
+      addEvent({ agent, kind: "work_brief_rejected", task: t?.id || null, summary: "阶段摘要未写入：" + e.message });
+    }
+    if (t && workBrief) t = getTask(t.id);
+  }
   if (scan && ["stop", "response", "transcript", "spec.task", "session.end"].includes(kind)) receipt = findReceipt(scan);
   let receiptResult = null;
   if (receipt) {
@@ -158,14 +169,14 @@ export function ingest(o) {
     }
   }
 
-  if (kind === "transcript" && !receiptResult) return { event: null, task: t, context };
+  if (kind === "transcript" && !receiptResult) return { event: null, task: t, context, workBrief };
   const ev = addEvent({ at: q.at || undefined, agent, kind, raw: o.event || "", task: t ? t.id : null, session: x.session, repo, branch: q.branch || "", summary: o.summary || summarize(kind, x, q.reason), data: payloadForStore(o.payload, x) });
-  return { event: ev, task: t, context, receipt: receiptResult };
+  return { event: ev, task: t, context, receipt: receiptResult, workBrief };
 }
 
 export function contextFor(t) {
   const brief = taskBrief(t);
-  const head = `你正在执行 agent-hub 任务 ${t.id}（当前状态：${t.status}）。下面是任务单；完成后按“交付回执”格式输出回执，能用 agent-hub MCP 时同时调用 submit_receipt。`;
+  const head = `你正在执行 agent-hub 任务 ${t.id}（当前状态：${t.status}）。先读取最新工作上下文；有阶段成果时维护短摘要，最终交付再提交回执。以下约定适用于首次开工与恢复工作。`;
   const s = head + "\n\n" + brief;
   return s.length > 9000 ? s.slice(0, 9000) + "\n…（任务单过长已截断，完整内容见 specs/" + t.id + ".md）" : s;
 }

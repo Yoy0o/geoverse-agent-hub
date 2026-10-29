@@ -682,25 +682,13 @@ function receiptPatch(t, r){
 function scopeOk(s){ return !s || /^(ok|无|none|没有)$/i.test(String(s).trim()); }
 
 /* ---------- task brief (hand to any agent) ---------- */
-function relevantRules(project){ return S.rules.filter(r => r.status!=="已废弃" && (!r.scope || r.scope==="全局" || r.scope===project)); }
-function taskBrief(t){
-  const L = [];
-  L.push("# 任务 "+t.id+"："+(t.title||""));
-  L.push("- 项目："+(t.project||"未指定")+" ｜ 风险等级："+(t.risk||"未定")+" ｜ 执行 Agent："+(t.agent||"未指定"));
-  L.push("", "## 目标", t.goal || "（待补充）");
-  L.push("", "## 验收标准（每条都要可验证）");
-  (t.acceptance||[]).length ? t.acceptance.forEach(a=>L.push("- [ ] "+a.text)) : L.push("- [ ] （待补充）");
-  L.push("", "## 范围", "- 允许修改："+(t.allow||"未限定"), "- 禁止修改："+(t.deny||"无额外限制"));
-  if (t.spec) L.push("", "## 规格", t.spec);
-  L.push("", "## 预算", "- 时长 ≤ "+(t.budgetMin||60)+" 分钟；验证最多修 3 轮。超出时停止，并在回执中说明原因。");
-  const pj = projByName(t.project);
-  if (pj && !(pj.onboard||{}).kit){ const inv = lines(pj.invariants).concat(lines(pj.forbidden)); if (inv.length){ L.push("", "## 项目约束"); inv.forEach(x=>L.push("- "+x)); } if (lines(pj.verify).length){ L.push("", "## 验证命令"); lines(pj.verify).forEach(x=>L.push("- `"+x+"`")); } }
-  if ((t.reworks||[]).length){ const r=t.reworks[t.reworks.length-1]; L.push("", "## 上次评审退回（请先处理）", "- 原因："+(r.reasons||[]).join("、")); if (r.note) L.push("- 说明："+r.note); }
-  L.push("", "## 工作方式", "- 在当前分支和目录中工作，不要切换、合并或删除分支", "- 提交信息末尾带 `Task: "+t.id+"`（git 钩子会自动补）", "- 阶段性进展：`bash scripts/agent/hub.sh progress <0-100> \"<当前步骤>\"`，或 agent-hub MCP 的 report_progress");
-  const pend = relevantRules(t.project).filter(r=>r.status==="待写入" || !(pj && (pj.onboard||{}).kit));
-  if (pend.length){ L.push("", "## 额外规则（尚未写入规则文件）"); pend.forEach(r=>L.push("- "+r.text)); }
-  L.push("", "## 完成后", "按 AGENTS.md 中的“交付回执”格式输出回执，task 填 "+t.id+"；能用 agent-hub MCP 时同时调用 submit_receipt。若没有该格式，使用：", "", RECEIPT_TEMPLATE.split("\n").slice(4).join("\n"));
-  return L.join("\n");
+async function copyTaskBrief(id){
+  try {
+    if (!(await taskEdits.flush(id)) || taskEdits.status().count) throw new Error("请等待修改保存后再复制任务单");
+    const text = await hub.req("GET", "/api/tasks/" + encodeURIComponent(id) + "/brief");
+    if (typeof text !== "string" || !text.trim()) throw new Error("任务单内容为空，请重试");
+    await copyText(text, "任务单");
+  } catch(error) { toast("任务单未复制：" + error.message); }
 }
 
 /* ---------- view: capture ---------- */
@@ -1179,7 +1167,7 @@ const A = {
   copy(el){ const w = el.dataset.what; const t = getTask(S.openId);
     if (w==="receipt-template") copyText(RECEIPT_TEMPLATE, "回执格式");
     else if (w==="mcp-prompt") copyText(MCP_PROMPT, "同步指令");
-    else if (w==="brief" && t) copyText(taskBrief(t), "任务单");
+    else if (w==="brief" && t) copyTaskBrief(t.id);
     else if (w==="task-md" && t) copyText(taskToMd(t), "Obsidian 笔记"); },
   async create(el){
     if (S.creating) return;
@@ -1206,7 +1194,7 @@ const A = {
       if (S.tab === "capture") lastKey = "";
       if (S.tab === "capture") { S.openId = id; S.reviewMode = null; loadActivity(id); loadTaskRuns(id); }
       toast("已创建 " + id);
-      if (copy) copyText(taskBrief(getTask(id) || doc), "任务单");
+      if (copy) await copyTaskBrief(id);
     } catch (error) { S.createError = error.message || "保存失败，请重试"; }
     finally { S.creating = false; render(); }
   },

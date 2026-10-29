@@ -33,7 +33,7 @@ export function hookRoutes(app, auth) {
   app.post("/hooks/:agent/transcript", auth, raw, (req, res) => {
     const agent = agentKey(req.params.agent);
     const r = ingest({ agent, kind: "transcript", event: "transcript", text: typeof req.body === "string" ? req.body : "", query: meta(req) });
-    res.json({ ok: true, receipt: !!(r && r.receipt) });
+    res.json({ ok: true, receipt: !!(r && r.receipt), workBrief: r?.workBrief || null });
   });
 
   app.post("/hooks/:agent", auth, raw, (req, res) => {

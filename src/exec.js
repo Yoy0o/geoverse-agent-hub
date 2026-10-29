@@ -195,8 +195,9 @@ export function handoffPrompt(t) {
   return [
     `执行 agent-hub 任务 ${t.id}：${t.title || ""}`,
     `1. 先运行 \`bash scripts/agent/task.sh attach ${t.id}\`（绑定任务、拉取任务单、向 agent-hub 报告开工）；仓库里没有这个脚本时，调用 agent-hub MCP 的 start_task(id="${t.id}", location="cloud")。`,
-    `2. 阅读 specs/${t.id}.md（或 get_task 的结果），按验收标准和允许修改的范围实现；阶段性进展用 \`bash scripts/agent/hub.sh progress <0-100> "<当前步骤>"\` 或 MCP report_progress 汇报。`,
-    "3. 结束前运行 bash scripts/agent/verify.sh，按 AGENTS.md 输出交付回执，能用 agent-hub MCP 时同时调用 submit_receipt。",
+    `2. 阅读 specs/${t.id}.md（或 get_work_context 的结果），按验收标准和允许修改的范围实现；阶段性进展用 \`bash scripts/agent/hub.sh progress <0-100> "<当前步骤>"\` 或 MCP report_progress 汇报。`,
+    "3. 有阶段结论、验证结果或阻塞时，先读取 get_work_context（或 bash scripts/agent/hub.sh context），按任务单的阶段成果约定调用 update_work_brief；没有 MCP 时用 hub.sh brief 或 agent-work-brief JSON 代码块回传。",
+    "4. 结束前运行 bash scripts/agent/verify.sh，按 AGENTS.md 输出交付回执，能用 agent-hub MCP 时同时调用 submit_receipt；提交后重新读取上下文并更新短摘要。",
   ].join("\n");
 }
 export function dispatch(t, b = {}, origin = "human") {
