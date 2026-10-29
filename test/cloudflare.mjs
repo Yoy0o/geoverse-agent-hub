@@ -7,6 +7,8 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import JSZip from "jszip";
+import { createHash } from "node:crypto";
+import { version } from "../src/version.js";
 
 const port = Number(process.env.TEST_CF_PORT || 8795), base = `http://127.0.0.1:${port}`;
 const token = "cloudflare-fixture-token-not-a-real-secret";
@@ -51,13 +53,22 @@ async function runOAuth() {
 try {
   await fs.mkdir(persist, { recursive: true });
   await start(false);
-  for (const p of ["/", "/shim.js", "/focus.js", "/focus.css", "/api/health", "/api/focus", "/api/export", "/mcp"]) {
+  for (const p of ["/", "/shim.js", "/focus.js", "/focus.css", "/task-edits.js", "/api/health", "/api/focus", "/api/export", "/mcp"]) {
     check((await call(p)).status === 401, `production Access gate protects ${p}`);
   }
   check((await call("/", { headers: { "Cf-Access-Authenticated-User-Email": "hio250@163.com", Authorization: "Bearer " + token } })).status === 401, "identity header plus Hub token cannot bypass Access");
   await stop();
   await start(true);
   check((await call("/")).status === 200, "local private-development page loads");
+  const releaseHealth = await json(await api("/api/health"));
+  const releaseCaps = await json(await api("/api/capabilities"));
+  check(releaseHealth.version === version && releaseCaps.version === version, "Node and Worker use the package release version");
+  check(/^[a-f0-9]{40}$/.test(releaseHealth.build.commit) && releaseHealth.build.commit === releaseCaps.build.commit, "health and capabilities identify the same build commit");
+  for (const file of ["index.html", "shim.js", "focus.js", "focus.css", "task-edits.js"]) {
+    const expected = createHash("sha256").update(await fs.readFile("public/" + file)).digest("hex");
+    const deployed = await (await call(file === "index.html" ? "/" : "/" + file)).arrayBuffer();
+    check(releaseHealth.build.assets[file] === expected && createHash("sha256").update(Buffer.from(deployed)).digest("hex") === expected, "build manifest matches served " + file);
+  }
   check((await call("/api/tasks")).status === 401, "Hub still requires authentication in local mode");
   check((await json(await api("/api/capabilities"))).oauth, "Worker OAuth routes initialize with Durable Object storage");
   const config = await json(await api("/api/docs/config/main"));

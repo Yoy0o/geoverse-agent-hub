@@ -27,11 +27,11 @@ const taskOr404 = (id) => { const t = getTask(id); if (!t) throw Object.assign(n
 const focus = createFocusService({ getDoc, listDocs, updateDoc, transaction }, attention);
 
 export function apiRoutes(app, auth) {
-  app.get("/api/health", (req, res) => res.json({ ok: true, version: config.version, ...stats() }));
+  app.get("/api/health", (req, res) => res.json({ ok: true, version: config.version, build: config.build, ...stats() }));
 
   app.get("/api/capabilities", auth, (req, res) => res.json({
     sample: llmEnabled(), llm: llmEnabled() ? { provider: config.llm.provider, model: config.llm.model } : null,
-    oauth: config.oauth, baseUrl: hubBaseUrl(req), mcpUrl: hubBaseUrl(req) + "/mcp", version: config.version, via: req.who.via,
+    oauth: config.oauth, baseUrl: hubBaseUrl(req), mcpUrl: hubBaseUrl(req) + "/mcp", version: config.version, build: config.build, via: req.who.via,
     hub: hubInfo(), exec: { stallMinutes: config.runStallMinutes, runnerOfflineSeconds: config.runnerOfflineSeconds }, sync: syncSummary(),
   }));
 
