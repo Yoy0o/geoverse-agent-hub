@@ -270,7 +270,7 @@ details.more summary{cursor:pointer;font-size:14px;font-weight:500}
 </head><body>
 <header class="bar"><div class="wrap">
   <div class="brand"><h1>Agent 工作台</h1><span id="hubtag"></span><span class="sub">多 Agent 任务 · 执行 · 评审 · 规则沉淀</span></div>
-  <span class="btns"><span class="sync" id="sync" title="与这台 Hub 的实时连接"><i></i><span>连接中…</span></span><span id="syncchip"></span><button class="btn pri sm" data-act="new-task" title="新建任务（快捷键 N）">新建任务</button><button class="btn ghost sm" data-act="shortcuts" title="快捷键（?）" aria-label="快捷键">?</button><button class="btn ghost sm" data-act="logout" title="退出登录">退出</button></span>
+  <span class="btns"><span class="sync" id="sync" title="与这台 Hub 的实时连接"><i></i><span>连接中…</span></span><span id="syncchip"></span><span id="save-state" class="small" role="status" aria-live="polite"></span><button class="btn ghost sm" id="save-retry" data-act="retry-edits" hidden>重试保存</button><button class="btn pri sm" data-act="new-task" title="新建任务（快捷键 N）">新建任务</button><button class="btn ghost sm" data-act="shortcuts" title="快捷键（?）" aria-label="快捷键">?</button><button class="btn ghost sm" data-act="logout" title="退出登录">退出</button></span>
 </div></header>
 <nav class="tabs" aria-label="视图"><div class="wrap" role="tablist" id="tabs"></div></nav>
 <div class="wrap"><div id="banner"></div><main id="view" aria-live="polite"></main></div>
@@ -280,6 +280,7 @@ details.more summary{cursor:pointer;font-size:14px;font-weight:500}
 <script src="/vendor/jszip.min.js"></script>
 <script src="/shim.js"></script>
 <script src="/focus.js"></script>
+<script src="/task-edits.js"></script>
 <script>
 (function(){
 "use strict";
@@ -305,6 +306,7 @@ const NEXT = {
 const S = {
   tab: "today", tasks: [], rules: [], retros: {}, config: {agents: DEFAULT_AGENTS.slice(), projects: []},
   mode: "loading", openId: null, reviewMode: null, weekOffset: 0,
+  creating: false, createAttempt: null, createDraft: {}, createError: "", writes: 0, writeError: "", wrote: false,
   filter: {project: "", agent: "", q: "", closed: false},
   loaded: {tasks:false, rules:false, retros:false, config:false},
   cap: {db:null, downloads:null, sample:null},
@@ -338,7 +340,10 @@ function fileSafe(s){ return String(s||"").replace(/[\\/:*?"<>|#^\[\]]/g,"-").re
 const queues = {};
 // 同一文档的写入排队执行。失败时提示一次并继续以失败结束，调用方后续的“已保存”提示不会执行；队列本身不中断
 function enqueue(path, fn){
-  const p = (queues[path] || Promise.resolve()).then(fn).catch(err => { reportErr(err); throw Object.assign(err || new Error("failed"), {reported:true}); });
+  S.writes++; S.writeError = ""; renderSaveState();
+  const p = (queues[path] || Promise.resolve()).then(fn).then(result => { S.wrote = true; return result; }).catch(err => {
+    S.writeError = err.message || "保存失败"; reportErr(err); throw Object.assign(err || new Error("failed"), {reported:true});
+  }).finally(() => { S.writes--; renderSaveState(); });
   queues[path] = p.catch(() => {}); return p;
 }
 window.addEventListener("unhandledrejection", e => { if (e.reason && e.reason.reported) e.preventDefault(); });
@@ -347,7 +352,7 @@ function reportErr(err){
   if (code === "quota_exceeded") toast("存储已满：请先删除一些旧任务或规则");
   else if (code === "invalid_argument") { toast("没有写入权限或数据格式不合法"); }
   else if (code === "resource_exhausted") toast("操作太频繁，请稍后再试");
-  else if (code === "revoked") { S.mode="local"; renderSync(); toast("数据连接已断开"); }
+  else if (code === "revoked") { toast("登录已失效，请重新登录；未保存内容仍保留在页面中"); }
   else if (code === "retired") toast(err.message || "本 Hub 已停用（只读）");
   else toast("保存失败，请重试");
 }
@@ -372,6 +377,33 @@ const store = {
 };
 function getTask(id){ return S.tasks.find(t=>t.id===id); }
 function patchTask(id, patch){ patch.updatedAt = nowIso(); return store.update("tasks", id, patch); }
+const taskEdits = window.createTaskEdits({
+  save(id, fields) {
+    if (S.mode !== "db") throw new Error("尚未连接，修改仍保留在当前页面");
+    if ("title" in fields && !String(fields.title).trim()) throw new Error("标题不能为空");
+    const patch = Object.fromEntries(Object.entries(fields).map(([f,v])=>[f, typeof v === "string" ? v.trim() : v]));
+    if ("cost" in patch) patch.costManual = patch.cost != null;
+    return patchTask(id, patch);
+  },
+  changed: renderSaveState
+});
+function renderSaveState(){
+  const el = $("#save-state"), retry = $("#save-retry"); if (!el) return;
+  const state = taskEdits.status();
+  const error = state.error || S.createError || S.writeError;
+  el.className = "small " + (error ? "bad" : "muted");
+  el.textContent = error ? "未保存：" + error : S.creating || state.saving || S.writes ? "保存中…" : state.count ? "有修改，等待保存…" : Object.keys(S.createDraft).length ? "新任务草稿（未创建）" : S.wrote || state.saved ? "已保存" : "";
+  retry.hidden = !state.error;
+}
+function editTaskField(el, flush){
+  const id = S.openId, f = el.dataset.f; if (!id || !f) return;
+  const value = NUMF.includes(f) ? num(el.value) : el.value;
+  taskEdits.change(id, f, value);
+  if (flush) taskEdits.flush(id);
+}
+window.addEventListener("beforeunload", e => {
+  if (S.creating || S.createAttempt || Object.keys(S.createDraft).length || S.writes || taskEdits.status().count) { e.preventDefault(); e.returnValue = ""; }
+});
 function moveTask(t, to, extra){
   const at = nowIso();
   const patch = Object.assign({status: to, history: (t.history||[]).concat([{at, from: t.status, to}]).slice(-40)}, extra||{});
@@ -434,16 +466,31 @@ function attention(){
 /* ---------- render framework ---------- */
 let lastKey = "";
 function render(){
-  renderTabs(); renderSync(); renderBanner();
+  renderTabs(); renderSync(); renderBanner(); renderSaveState();
   const key = S.tab + "|" + (S.openId||"") + "|" + (S.reviewMode||"");
   const preserve = key === lastKey; lastKey = key;
   withPreserved($("#view"), preserve, () => { $("#view").innerHTML = VIEWS[S.tab](); });
   withPreserved($("#layer"), preserve, () => { $("#layer").innerHTML = S.openId && getTask(S.openId) ? drawerHtml(getTask(S.openId)) : ""; });
+  restoreCreateDraft();
+}
+function captureCreateDraft(el){
+  if (!el.matches('input[id^="n-"],textarea[id^="n-"],select[id^="n-"]')) return;
+  if (el.type === "radio") S.createDraft[el.name] = el.value;
+  else S.createDraft[el.id] = el.value;
+  renderSaveState();
+}
+function restoreCreateDraft(){
+  $$('input[id^="n-"],textarea[id^="n-"],select[id^="n-"]', $("#view")).forEach(el => {
+    if (el.type === "radio") { if (el.name in S.createDraft) el.checked = el.value === S.createDraft[el.name]; }
+    else if (el.id in S.createDraft) el.value = S.createDraft[el.id];
+    el.disabled = S.creating;
+  });
+  const tip = $("#n-risk-tip"); if (tip && S.createDraft["n-risk"]) tip.textContent = RISK_TIP[S.createDraft["n-risk"]] || "";
 }
 function withPreserved(root, preserve, fn){
-  if (!preserve) { fn(); return; }
+  if (!preserve) { fn(); restoreTaskEdits(root); return; }
   const vals = {};
-  $$("input[id],textarea[id],select[id]", root).forEach(el => { vals[el.id] = (el.type==="checkbox"||el.type==="radio") ? {c:el.checked} : {v:el.value}; });
+  $$("input[id],textarea[id],select[id]", root).filter(el => !el.dataset.f).forEach(el => { vals[el.id] = (el.type==="checkbox"||el.type==="radio") ? {c:el.checked} : {v:el.value}; });
   const a = document.activeElement; const act = a && root.contains(a) && a.id ? a.id : null;
   let sel = null; try { if (act && a.selectionStart!=null) sel = [a.selectionStart, a.selectionEnd]; } catch(e){}
   const scrollers = $$("[data-keep-scroll]", root).map(el=>[el.dataset.keepScroll, el.scrollTop, el.scrollLeft]);
@@ -452,8 +499,13 @@ function withPreserved(root, preserve, fn){
   fn();
   const ds = $$("details", root); ds.forEach((el,i)=>{ if(el.id && openedById.has(el.id)) el.open = openedById.get(el.id); else if(!el.id && ds.length === opened.length) el.open = opened[i]; });
   Object.entries(vals).forEach(([id,s]) => { const el = document.getElementById(id); if (!el || !root.contains(el)) return; if ("c" in s) el.checked = s.c; else if (el.value !== s.v) el.value = s.v; });
+  restoreTaskEdits(root);
   scrollers.forEach(([k,t,l])=>{ const el=root.querySelector('[data-keep-scroll="'+k+'"]'); if(el){ el.scrollTop=t; el.scrollLeft=l; } });
   if (act) { const el = document.getElementById(act); if (el) { el.focus({preventScroll:true}); if (sel && el.setSelectionRange) try { el.setSelectionRange(sel[0], sel[1]); } catch(e){} } }
+}
+function restoreTaskEdits(root){
+  if (!S.openId) return;
+  $$("[data-f]", root).forEach(el => { const v = taskEdits.value(S.openId, el.dataset.f, el.value); el.value = v == null ? "" : String(v); });
 }
 function renderTabs(){
   const need = S.tasks.filter(t=>t.status==="需介入"||t.status==="待评审").length;
@@ -681,7 +733,8 @@ function viewCapture(){
     '<label class="f"><span>验收标准（每行一条，尽量可验证）</span><textarea id="n-acc" placeholder="当导出超过 10,000 行时，改为异步生成并通知用户&#10;make test 全部通过"></textarea></label>'+
     '<div class="row c2"><label class="f"><span>允许修改</span><input type="text" id="n-allow" placeholder="src/order/**"></label><label class="f"><span>禁止修改</span><input type="text" id="n-deny" placeholder="db/migrations/**"></label></div>'+
     '<div class="row c3"><label class="f"><span>时长预算（分钟）</span><input type="number" id="n-budget" min="0" step="5" value="60"></label><label class="f"><span>规格链接</span><input type="text" id="n-spec" placeholder="specs/… 或 URL"></label><label class="f"><span>分支</span><input type="text" id="n-branch" placeholder="agent/…"></label></div>'+
-    '<div class="btns"><button class="btn pri" data-act="create">创建任务</button><button class="btn" data-act="create" data-copy="1">创建并复制任务单</button></div>'+
+    '<div class="btns"><button class="btn pri" data-act="create"'+(S.creating?' disabled':'')+'>'+(S.creating?'创建中…':'创建任务')+'</button><button class="btn" data-act="create" data-copy="1"'+(S.creating?' disabled':'')+'>创建并复制任务单</button></div>'+
+    (S.createError?'<p class="bad" role="alert">创建未完成，内容已保留。请重试；重复提交会沿用同一任务编号。</p>':'')+
   '</div></div>'+
   '<div class="stack"><div class="panel"><h2>粘贴交付回执</h2><p class="hint">接入了钩子或 MCP 的 Agent 会自动回传回执，这里是兜底：把 Agent 结束时的输出贴进来。按回执格式的内容会直接解析；格式不对时可以让 '+AI()+' 帮忙提取。</p><div class="form">'+
     '<textarea id="r-text" class="code" placeholder="```agent-receipt&#10;task: T260922-a1b&#10;status: done&#10;summary: …&#10;```"></textarea>'+
@@ -760,7 +813,10 @@ function viewRetro(){
 const MCP_PROMPT = "请用 agent-hub 连接器（list_tasks 带 include_closed、get_task、list_rules）读取我的 Agent 工作台，然后通过 Obsidian MCP 把内容写进我的 vault 的「Agent工作台」文件夹：每个任务一篇笔记放在「任务/」，文件名用任务编号，属性用 YAML frontmatter（id、title、project、agent、risk、status、created、done、cost、minutes、rework、first_pass、reasons、pr、session）；规则放在「规则/」；每周复盘放在「复盘/」，用 [[任务编号]] 链接相关任务。已存在的笔记只更新 frontmatter 和「工作台同步」段落，不要覆盖我手写的内容。";
 function viewExport(){
   const samples = S.tasks.filter(t=>t.sample).length;
-  return '<div class="grid2"><div class="stack">'+syncPanel()+
+  const release = S.hub.caps;
+  const build = release && release.build;
+  const versionPanel = release ? '<div class="panel"><h2>当前版本</h2><p>v'+esc(release.version||"未知")+(build&&build.commit?' · <code>'+esc(build.commit.slice(0,12))+'</code>':' · 未提供发布提交')+'</p>'+(build&&build.builtAt?'<p class="hint">构建时间：'+esc(fmtDate(build.builtAt))+(build.dirty?' · 包含未提交修改':'')+'</p>':'')+'</div>' : '';
+  return '<div class="grid2"><div class="stack">'+versionPanel+syncPanel()+
     '<div class="panel"><h2>导出到 Obsidian</h2><p class="hint">生成一个 zip：每个任务、规则、复盘各一篇 Markdown 笔记（YAML 属性），外加两个 Bases 看板文件，解压到 vault 根目录即可使用。</p>'+
       '<div class="form"><label class="small"><input type="checkbox" id="x-all" checked> 包含已结束超过 30 天的任务</label>'+
       '<div class="btns">'+(S.cap.downloads?'<button class="btn pri" data-act="export-obsidian">下载 Obsidian 包（.zip）</button>':'<span class="small muted">当前环境不支持下载文件，请用下面的 MCP 方式同步。</span>')+'</div></div>'+
@@ -1125,15 +1181,36 @@ const A = {
     else if (w==="mcp-prompt") copyText(MCP_PROMPT, "同步指令");
     else if (w==="brief" && t) copyText(taskBrief(t), "任务单");
     else if (w==="task-md" && t) copyText(taskToMd(t), "Obsidian 笔记"); },
-  create(el){
+  async create(el){
+    if (S.creating) return;
     const title = val("n-title").trim(); if (!title){ toast("请填写标题"); document.getElementById("n-title").focus(); return; }
     const risk = (document.querySelector('input[name="n-risk"]:checked')||{}).value || "L2";
     const doc = newTaskDoc({title, project: val("n-project"), agent: val("n-agent"), risk, status: val("n-status"), goal: val("n-goal").trim(),
       acceptance: val("n-acc").split(/\n/).map(s=>s.trim()).filter(Boolean).map(text=>({text, done:false})), allow: val("n-allow").trim(), deny: val("n-deny").trim(),
       budgetMin: num(val("n-budget")) ?? 60, spec: val("n-spec").trim(), branch: val("n-branch").trim()});
-    const id = newTaskId(); doc.id = id;
-    store.set("tasks", id, doc).then(()=>{ toast("已创建 "+id); if (el.dataset.copy) copyText(taskBrief(doc), "任务单"); });
-    S.openId = id; render();
+    // Keep the same ID for an ambiguous failure (server saved, response was lost).
+    const id = S.createAttempt || newTaskId(); doc.id = id; S.createAttempt = id;
+    const copy = !!el.dataset.copy;
+    $$('input[id^="n-"],textarea[id^="n-"],select[id^="n-"]').filter(el => el.type !== "radio" || el.checked).forEach(captureCreateDraft);
+    S.creating = true; S.createError = ""; render();
+    try {
+      if (S.mode !== "db") throw new Error("尚未连接到 Hub，请登录后重试");
+      // A retry must never overwrite a task already saved by the previous request.
+      let existing = null;
+      try { existing = await hub.req("GET", "/api/docs/tasks/" + encodeURIComponent(id)); }
+      catch (error) { if (error.status !== 404) throw error; }
+      if (existing) localPut("tasks", id, existing.data);
+      else await store.set("tasks", id, doc);
+      S.createAttempt = null; S.createDraft = {}; S.writeError = ""; S.wrote = true;
+      // Reset the form even when another drawer was opened while the request ran.
+      if (S.tab === "capture") lastKey = "";
+      if (S.tab === "capture") { S.openId = id; S.reviewMode = null; loadActivity(id); loadTaskRuns(id); }
+      toast("已创建 " + id);
+      if (copy) copyText(taskBrief(getTask(id) || doc), "任务单");
+    } catch (error) { S.createError = error.message || "保存失败，请重试"; }
+    finally { S.creating = false; render(); }
+  },
+  "retry-edits"(){ S.writeError = ""; taskEdits.retry(); renderSaveState();
   },
   "parse-receipt"(){ const r = parseReceipt(val("r-text")); S.receiptPreview = r ? {data:r, by:"local"} : {error: "没有识别到回执格式。" + (S.cap.sample ? "可以点“让 Claude 解析”。" : "请检查是否包含 task / summary 等字段。")}; render(); },
   async "parse-receipt-ai"(el){ const tx = val("r-text").trim(); if (!tx){ toast("请先粘贴内容"); return; } el.disabled = true; el.textContent = "解析中…";
@@ -1187,6 +1264,7 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("change", e => {
   const el = e.target;
+  captureCreateDraft(el);
   if (S.dispatch && el.name==="dp-mode"){ S.dispatch.mode = el.value; render(); return; }
   if (S.dispatch && el.id==="dp-runner"){ S.dispatch.runner = el.value; S.dispatch.agent = ""; render(); return; }
   if (S.dispatch && el.id==="dp-agent"){ S.dispatch.agent = el.value; return; }
@@ -1195,12 +1273,10 @@ document.addEventListener("change", e => {
   if (el.dataset.act==="onboard"){ const i = +el.dataset.i; const ps = S.config.projects.map((p,j)=> j===i ? Object.assign({}, p, {onboard: Object.assign({}, p.onboard||{}, {[el.dataset.k]: el.checked})}) : p); saveConfig({projects: ps}); return; }
   if (el.name==="n-risk"){ const tip = $("#n-risk-tip"); if (tip) tip.textContent = RISK_TIP[el.value]||""; return; }
   if (el.id==="imp-file" && el.files && el.files[0]){ importJson(el.files[0]); el.value = ""; return; }
-  if (el.dataset.f && S.openId){ const t = getTask(S.openId); if (!t) return; const f = el.dataset.f; let v = el.value;
-    if (NUMF.includes(f)) v = num(v); else v = String(v).trim();
-    if (f==="title" && !v){ el.value = t.title||""; toast("标题不能为空"); return; }
-    if (t[f] !== v) patchTask(t.id, f==="cost" ? {cost: v, costManual: v!=null} : {[f]: v}); }
+  if (el.dataset.f && S.openId) editTaskField(el, true);
 });
-document.addEventListener("input", e => { const el = e.target; if (el.dataset.act==="filter" && el.type==="search"){ S.filter.q = el.value; render(); } });
+document.addEventListener("input", e => { const el = e.target; captureCreateDraft(el); if (el.dataset.f && S.openId) editTaskField(el, false); if (el.dataset.act==="filter" && el.type==="search"){ S.filter.q = el.value; render(); } });
+document.addEventListener("focusout", e => { if (e.target.dataset.f && S.openId) taskEdits.flush(S.openId); });
 document.addEventListener("keydown", e => {
   if (e.key==="Escape"){ if (modalEl) closeModal(); else if (S.dispatch){ S.dispatch = null; render(); } else if (S.openId) closeDrawer(); return; }
   const tg = e.target;

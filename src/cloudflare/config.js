@@ -1,3 +1,5 @@
+import { version } from "../version.js";
+import build from "../../.cloudflare/release.js";
 import { current } from "./runtime.js";
 import { syncConfig } from "../config-sync.js";
 
@@ -14,7 +16,7 @@ export function createConfig(env) {
     cookieSecure: publicUrl.startsWith("https://"),
     sessionTtlSeconds: Math.max(1, Math.min(num(env.SESSION_TTL_SECONDS, 7 * 86400), 30 * 86400)),
     usdToCny: num(env.USD_CNY, 7.2), storePayload: String(env.HUB_STORE_PAYLOAD || "summary").toLowerCase(),
-    eventRetentionDays: Math.max(1, num(env.EVENT_RETENTION_DAYS, 90)), priceTable, version: "0.3.0",
+    eventRetentionDays: Math.max(1, num(env.EVENT_RETENTION_DAYS, 90)), priceTable, version, build,
     hubName: String(env.HUB_NAME || "云端 Hub").trim().slice(0, 40), hubKind: env.HUB_KIND === "local" ? "local" : "cloud",
     runStallMinutes: Math.max(1, num(env.RUN_STALL_MINUTES, 15)), runnerOfflineSeconds: Math.max(15, num(env.RUNNER_OFFLINE_SECONDS, 90)),
     sync: syncConfig(env), retiredTo: String(env.HUB_RETIRED_TO || "").trim().replace(/\/+$/, ""),

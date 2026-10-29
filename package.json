@@ -1,6 +1,6 @@
 {
   "name": "agent-hub",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "自托管 Agent 工作台：任务、评审、规则 + 多 coding agent 接入（MCP / 钩子 / OTel）",
   "main": "src/server.js",
   "scripts": {
@@ -19,7 +19,9 @@
     "test:connect": "node --test test/connect.test.mjs",
     "test:unit": "node --test test/merge.test.mjs test/store.test.mjs test/runner.test.mjs test/focus.test.mjs test/focus-api.test.mjs",
     "test:focus": "node --test test/focus.test.mjs test/focus-api.test.mjs",
-    "test:cloudflare": "node test/cloudflare.mjs"
+    "test:cloudflare": "node test/cloudflare.mjs",
+    "test:ui": "node --test test/workbench-ui.test.mjs",
+    "verify:release": "node scripts/verify-release.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
@@ -36,6 +38,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260930.1",
     "@types/node": "^22.20.4",
+    "jsdom": "^26.1.0",
     "wrangler": "^4.144.0"
   },
   "imports": {

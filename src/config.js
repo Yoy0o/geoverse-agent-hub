@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { version } from "./version.js";
 import { syncConfig } from "./config-sync.js";
 
 const env = process.env;
@@ -60,7 +61,8 @@ export const config = {
   sync: syncConfig(env),
   // 云端唯一：本 Hub 退役为只读并指向云端（也可以用 node src/cli.js retire 开启）
   retiredTo: String(env.HUB_RETIRED_TO || "").trim().replace(/\/+$/, ""),
-  version: "0.3.0",
+  version,
+  build: { commit: env.HUB_BUILD_SHA || null, builtAt: env.HUB_BUILD_AT || null, dirty: null },
 };
 
 export function hubBaseUrl(req) {
