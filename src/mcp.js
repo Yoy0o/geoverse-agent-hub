@@ -21,7 +21,7 @@ const focus = createFocusService({ getDoc, listDocs, updateDoc, transaction }, a
 
 function build(agent) {
   const server = new McpServer({ name: "agent-hub", version: config.version }, {
-    instructions: "agent-hub 是研发任务工作台。人问今天需要判断什么时优先调用 get_focus，默认只说明变化、影响和推荐动作，细节按需展开。开工用 get_work_context 读取已有结论、关联工作与任务单，再用 start_task 登记执行。按验收标准和允许范围工作，进展用 report_progress。结束时 submit_receipt 提交真实验证结果，再读取当前上下文，用 update_work_brief 更新短摘要、下一步、必要的决策和已有任务关联。不得虚构验证或仅凭相似标题关联任务。读取不代表已读，采纳建议不代表任务完成。在云端执行时 start_task 传 location=cloud；执行位置和心跳用 list_runs。",
+    instructions: "agent-hub 是研发任务工作台。人问今天需要判断什么时优先调用 get_focus，默认只说明变化、影响和推荐动作，细节按需展开。开工用 get_work_context 读取已有结论、关联工作与任务单，再用 start_task 登记执行。按验收标准和允许范围工作，进展用 report_progress。有阶段结论、验证结果、阻塞或待决策事项时，先重新读取 get_work_context，再用 update_work_brief 更新同一张短摘要卡；无实质变化不更新。结束时 submit_receipt 提交真实验证结果，再读取当前上下文，用 update_work_brief 更新短摘要、下一步、必要的决策和已有任务关联。不得虚构验证或仅凭相似标题关联任务。读取不代表已读，采纳建议不代表任务完成。在云端执行时 start_task 传 location=cloud；执行位置和心跳用 list_runs。",
   });
   // 已停用的 Hub：只读工具照常可用，写工具返回切换到云端的提示
   const retired = retiredTo();

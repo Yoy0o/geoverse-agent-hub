@@ -12,6 +12,8 @@
 #   bash scripts/agent/hub.sh where                    输出执行位置（local / cloud）与主机名
 #   bash scripts/agent/hub.sh ping                     检查连接（含暂存的上报数量、Hub 是否已停用）
 #   bash scripts/agent/hub.sh flush                    立即补发网络中断时暂存的上报
+#   bash scripts/agent/hub.sh context                 读取最新工作上下文与指纹
+#   bash scripts/agent/hub.sh brief <JSON文件>         写入阶段摘要（冲突时重新读取）
 #   bash scripts/agent/hub.sh backup [目录]            下载 JSON 备份（任务、规则、复盘、设置）
 # 临时关闭上报：AGENT_HUB_DISABLE=1；执行位置自动识别（Claude Code 云端、Codespaces、CI），也可用 AGENT_HUB_LOCATION=local|cloud 指定
 # 网络中断时，事件、回执、进度先暂存在 ~/.cache/agent-hub/spool（AGENT_HUB_SPOOL），下次上报成功后在后台按原始时间补发
@@ -139,11 +141,11 @@ hub_report() {
       # 这些事件可能带交付回执，前台发送（最多 4 秒）；失败时暂存，回执不会丢
       hub_send "/hooks/$agent?event=$ev" application/json 4 "$body"
       # 载荷里没有回执、但给了会话记录路径（Copilot / Kiro）：会话记录尾部有回执时发过去提取
-      if ! printf '%s' "$body" | grep -q 'agent-receipt'; then
+      if ! printf '%s' "$body" | grep -Eq 'agent-(receipt|work-brief)'; then
         tp=$(printf '%s' "$body" | sed -nE 's/.*"(transcript_path|transcriptPath)"[[:space:]]*:[[:space:]]*"([^"]+)".*/\2/p' | head -n 1)
         if [ -n "$tp" ] && [ -f "$tp" ]; then
           tdata=$(tail -c 131072 "$tp" 2>/dev/null)
-          if printf '%s' "$tdata" | grep -q 'agent-receipt'; then hub_send "/hooks/$agent/transcript?event=$ev" text/plain 4 "$tdata"; fi
+          if printf '%s' "$tdata" | grep -Eq 'agent-(receipt|work-brief)'; then hub_send "/hooks/$agent/transcript?event=$ev" text/plain 4 "$tdata"; fi
         fi
       fi
       ;;
@@ -175,6 +177,13 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
         echo "已汇报 $id：${pj/null/—}% ${step}"
       else echo "连不上 agent-hub，进度已暂存，恢复后自动补发：$id ${pj/null/—}% ${step}"; fi
       exit 0 ;;
+    context|brief)
+      [ -n "$HUB_URL" ] || { echo "agent-hub 未配置" >&2; exit 2; }
+      id=$(hub_task); [ -n "$id" ] || { echo "当前目录没有关联任务" >&2; exit 1; }
+      if [ "$cmd" = context ]; then hub_api GET "/api/tasks/$id/focus/context"; exit $?; fi
+      file=${1:-}; [ -f "$file" ] || { echo "用法：hub.sh brief <包含 expectedFingerprint 与 content 的 JSON 文件>" >&2; exit 1; }
+      # Do not queue or silently retry stale context writes. A 409 requires re-reading.
+      hub_api PUT "/api/tasks/$id/focus?agent=${AGENT_HUB_AGENT:-task-sh}" "$(cat "$file")"; exit $? ;;
     flush)
       [ -n "$HUB_URL" ] || { echo "agent-hub 未配置" >&2; exit 2; }
       n=$(hub_flush); echo "已补发 ${n:-0} 条，剩余 $(hub_spool_count) 条（$HUB_SPOOL）"; exit 0 ;;

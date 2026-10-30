@@ -2,6 +2,7 @@
 import { template as tpl } from "#hub/templates";
 import JSZip from "jszip";
 import { lines, relevantRules, RECEIPT_TEMPLATE } from "./domain.js";
+import { WORK_BRIEF_GUIDE } from "./work-brief.js";
 
 const shq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
 const fileSafe = (s) => String(s || "").replace(/[\\/:*?"<>|#^[\]]/g, "-").replace(/\s+/g, " ").trim().slice(0, 80) || "untitled";
@@ -28,7 +29,7 @@ export function agentsMd(p) {
     "- 回执提交后重新读取 `get_work_context`，再用 `update_work_brief` 更新短结论、下一步、必要决策与已有任务关联；使用返回的 expectedFingerprint，保留仍有效的 content 字段",
     "- 给人的默认说明只包含本次变化、对已完成工作的影响、需要决定什么和一个推荐动作；完整依据按需展开。读取不代表已读，采纳建议不代表验收完成", "");
   const rs = relevantRules(p.name); if (rs.length) { L.push("## 规则（来自工作台规则库）"); rs.forEach((r) => L.push("- " + r.text)); L.push(""); }
-  L.push(RECEIPT_TEMPLATE, "");
+  L.push(WORK_BRIEF_GUIDE, "", RECEIPT_TEMPLATE, "");
   return L.join("\n");
 }
 

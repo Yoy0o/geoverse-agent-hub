@@ -16,7 +16,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 const args = process.argv.slice(2);
 const cmd = args[0] && !args[0].startsWith("--") ? args[0] : "help";
 const opt = (k, d) => { const i = args.indexOf("--" + k); return i >= 0 && args[i + 1] !== undefined && !args[i + 1].startsWith("--") ? args[i + 1] : d; };
@@ -41,7 +41,7 @@ const DEFAULT_AGENTS = {
   codex: { bin: "codex", cmd: ["codex", "exec", "--full-auto", "{prompt}"] },
   gemini: { bin: "gemini", cmd: ["gemini", "-p", "{prompt}"] },
 };
-const PROMPT = (id) => `执行任务 ${id}：先阅读 specs/${id}.md（任务单），按验收标准和允许修改的范围实现；过程中可以用 bash scripts/agent/hub.sh progress <0-100> "<当前步骤>" 汇报进度；结束前运行 bash scripts/agent/verify.sh，最后按 AGENTS.md 输出交付回执（agent-receipt 代码块）。`;
+const PROMPT = (id) => `执行任务 ${id}：先阅读 specs/${id}.md（任务单），按验收标准和允许修改的范围实现；过程中可以用 bash scripts/agent/hub.sh progress <0-100> "<当前步骤>" 汇报进度；阶段成果按任务单约定用 get_work_context / update_work_brief 或 hub.sh context / brief 更新短摘要，钩子也支持 agent-work-brief JSON 代码块；结束前运行 bash scripts/agent/verify.sh，最后按 AGENTS.md 输出交付回执（agent-receipt 代码块）。`;
 
 /* ---------------- 跨平台：bash 与 Agent 命令 ---------------- */
 // 找运行仓库脚本用的 bash。Windows 上 PATH 里的 bash 往往是 System32 的 WSL 启动器，必须避开
@@ -223,6 +223,7 @@ async function handle({ run, task }) {
       // 回执兜底：钩子没有送达时，从 Agent 的输出里提取（hub 按指纹去重）
       let text = "";
       try { const size = fs.statSync(logFile).size; const fd = fs.openSync(logFile, "r"); const n = Math.min(size, 262144); const buf = Buffer.alloc(n); fs.readSync(fd, buf, 0, n, size - n); fs.closeSync(fd); text = buf.toString("utf8"); } catch { /* 没有输出 */ }
+      if (/agent-work-brief/i.test(text)) await api("POST", `/api/tasks/${encodeURIComponent(task.id)}/focus/report?agent=${encodeURIComponent(run.agent || "runner")}`, { text }).catch((e) => log("! 阶段摘要未写入（请重新读取上下文）：" + e.message));
       if (/agent-receipt/i.test(text)) await api("POST", `/api/tasks/${encodeURIComponent(task.id)}/receipt?agent=${encodeURIComponent(run.agent || "runner")}`, { text }).catch((e) => log("! 回执上报失败：" + e.message));
       const exitCode = code ?? (signal ? 128 : 1);
       log(`${exitCode === 0 ? "✓" : "✗"} ${task.id} Agent 已退出（${signal || "退出码 " + exitCode}）· 输出：${logFile}`);

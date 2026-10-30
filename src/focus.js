@@ -141,7 +141,7 @@ export function createFocusService(store, attention = () => []) {
   }
   function context(id) {
     const v = get(id), s = v.snapshot;
-    return { ...v, brief: [
+    return { ...v, expectedFingerprint: v.fingerprint, brief: [
       `# 工作上下文：${s.title}`, `任务：${id}`, `状态：${s.status}`, `当前结论：${s.summary}`, `下一步：${s.nextAction}`,
       s.decision ? `待决策：${s.decision}（${v.decisionResolved ? "已采纳当前建议" : "未解决"}）` : "",
       s.recommendation ? `推荐动作：${s.recommendation}` : "", s.risk ? `风险与未决项：${s.risk}` : "",

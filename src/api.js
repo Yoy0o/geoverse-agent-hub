@@ -6,6 +6,7 @@ import {
   reviewTask, applyReceipt, parseReceipt, findReceipt, normReceipt, taskBrief, attention,
 } from "./domain.js";
 import { createFocusService } from "./focus.js";
+import { receiveWorkBrief } from "./work-brief.js";
 import { ingest, channels } from "./ingest.js";
 import { execMeta } from "./hooks.js";
 import {
@@ -27,6 +28,12 @@ const taskOr404 = (id) => { const t = getTask(id); if (!t) throw Object.assign(n
 const focus = createFocusService({ getDoc, listDocs, updateDoc, transaction }, attention);
 
 export function apiRoutes(app, auth) {
+  app.post("/api/tasks/:id/focus/report", auth, handle((req) => {
+    taskOr404(req.params.id);
+    const result = receiveWorkBrief(req.body?.text, req.params.id, who(req));
+    if (!result) throw Object.assign(new Error("没有识别到 agent-work-brief 代码块"), { status: 400, expose: true });
+    return result;
+  }));
   app.get("/api/health", (req, res) => res.json({ ok: true, version: config.version, build: config.build, ...stats() }));
 
   app.get("/api/capabilities", auth, (req, res) => res.json({

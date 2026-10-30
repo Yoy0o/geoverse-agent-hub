@@ -199,6 +199,7 @@ cat > "$T/fake-agent.sh" <<'FAKE'
 id=$1
 bash scripts/agent/hub.sh progress 60 "fake 实现中" >/dev/null
 echo "c" > src/c.js && git add -A && git commit -qm "feat: c"
+bash scripts/agent/hub.sh context | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const c=JSON.parse(s);console.log("```agent-work-brief\n"+JSON.stringify({task:c.id,expectedFingerprint:c.expectedFingerprint,content:{summary:"执行端阶段结论",nextAction:"核对交付依据"}})+"\n```")})'
 printf '完成。\n\n```agent-receipt\ntask: %s\nstatus: done\nsummary: 执行端自动执行完成\nchanged:\n  - src/c.js\nverify:\n  - bash scripts/agent/verify.sh: pass\nscope: ok\nrisks: 无\n```\n' "$id"
 FAKE
 printf '#!/usr/bin/env bash\necho "什么也没做"\n' > "$T/lazy-agent.sh"
@@ -214,6 +215,7 @@ check "原执行记录标记为已替代" '[ "$(api $AGENT_HUB_URL/api/runs/$RUN
 node "$T/runner.mjs" once > "$T/runner.log" 2>&1; rc=$?
 check "runner.mjs once：领取 → 复用 worktree → 启动 Agent" '[ $rc -eq 0 ] && grep -q "已启动 fake" "$T/runner.log"'; [ $rc -eq 0 ] || cat "$T/runner.log"
 check "Agent 输出的回执由执行端兜底回传 → 待评审" '[ "$(api $AGENT_HUB_URL/api/tasks/$ID3 | jget "o.status+\"/\"+o.receipt.summary")" = "待评审/执行端自动执行完成" ]'
+check "执行端先补报阶段摘要，再保存完整交付回执" '[ "$(api $AGENT_HUB_URL/api/tasks/$ID3/focus | jget "o.content.summary+\"/\"+o.content.nextAction")" = "执行端阶段结论/核对交付依据" ]'
 check "执行记录：已交付 · 本机 · 该执行端 · 退出码 0" '[ "$(api $AGENT_HUB_URL/api/runs/$NRUN | jget "[o.status,o.location,o.runner,o.exitCode,o.progress].join(\"/\")")" = "done/local/$RID/0/100" ]'
 check "Agent 中途的进度汇报关联到同一执行" '[ "$(api "$AGENT_HUB_URL/api/tasks/$ID3/activity" | jget "o.events.some(e=>e.kind===\"progress\"&&e.summary.includes(\"fake 实现中\"))")" = "true" ]'
 check "任务记录了 2 次执行尝试" '[ "$(api $AGENT_HUB_URL/api/tasks/$ID3 | jget o.exec.attempts)" = "2" ]'

@@ -2,6 +2,7 @@
 import crypto from "node:crypto";
 import { getDoc, setDoc, updateDoc, listDocs } from "#hub/db";
 import { config } from "#hub/config";
+import { WORK_BRIEF_GUIDE, workContext } from "./work-brief.js";
 
 export const STATUSES = ["待规格", "待执行", "执行中", "需介入", "待评审", "已合并", "已放弃"];
 export const OPEN = ["待规格", "待执行", "执行中", "需介入", "待评审"];
@@ -197,6 +198,8 @@ export function relevantRules(project, rules = allRules()) {
 export function taskBrief(t) {
   const L = [];
   L.push("# 任务 " + t.id + "：" + (t.title || ""));
+  L.push("", WORK_BRIEF_GUIDE);
+  if (getTask(t.id)) L.push("", "## 当前工作上下文（任务单生成时）", workContext(t.id).brief.slice(0, 4500));
   L.push("- 项目：" + (t.project || "未指定") + " ｜ 风险等级：" + (t.risk || "未定") + " ｜ 执行 Agent：" + (t.agent || "未指定"));
   L.push("", "## 目标", t.goal || "（待补充）");
   L.push("", "## 验收标准（每条都要可验证）");

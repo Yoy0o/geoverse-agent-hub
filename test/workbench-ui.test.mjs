@@ -16,7 +16,7 @@ async function workbench(t, initial = []) {
   const dom = new JSDOM(html, { url: 'http://hub.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close());
   const w = dom.window, docs = new Map(initial.map(d => [d.id, structuredClone(d)])), subscribers = new Map();
-  const api = { puts: [], patches: [], setGate: null, patchGate: null, failAfterPut: false, patchError: null };
+  const api = { puts: [], patches: [], briefs: [], copied: [], setGate: null, patchGate: null, failAfterPut: false, patchError: null, briefError: null };
   const snapshot = name => ({ docs: name === 'tasks' ? [...docs].map(([id,data]) => ({ id, data: () => structuredClone(data) })) : [] });
   const notify = () => subscribers.get('tasks')?.(snapshot('tasks'));
   const db = {
@@ -41,6 +41,7 @@ async function workbench(t, initial = []) {
     }
   };
   w.structuredClone = structuredClone; w.scrollTo = () => {};
+  w.navigator.clipboard = { async writeText(text) { api.copied.push(text); } };
   const caps = { sample: false, version: '0.3.1', hub: { name: 'Test Hub', kind: 'cloud' } };
   w.hub = { caps: async () => caps, async req(method, url) {
     if (url.startsWith('/api/docs/tasks/')) {
@@ -50,6 +51,12 @@ async function workbench(t, initial = []) {
     }
     if (url === '/api/focus') return { items: [], remaining: [], updates: [], total: docs.size, counts: { attention: 0, updates: 0 } };
     if (url.endsWith('/focus')) throw Object.assign(new Error('No brief in fixture'), { status: 404 });
+    if (url.endsWith('/brief')) {
+      api.briefs.push(url);
+      if (api.briefError) throw api.briefError;
+      const d = docs.get(decodeURIComponent(url.split('/').at(-2)));
+      return '# Server task sheet: ' + d.title + '\n' + d.goal + '\n阶段成果：update_work_brief';
+    }
     if (url.startsWith('/api/exec')) return { runners: [], recent: [], active: [] };
     if (url.startsWith('/api/runs')) return [];
     if (url.startsWith('/api/sync')) return { configured: false };
@@ -131,4 +138,25 @@ test('an older successful response does not clear a newer edit', async t => {
   const gate=b.api.patchGate; b.api.patchGate=null; gate.resolve();
   await until(() => b.docs.get('T-race').goal === 'Newest edit'); await until(() => b.$('#save-state').textContent === '已保存');
   assert.deepEqual(b.api.patches.map(p=>p.patch.goal),['First edit','Newest edit']);
+});
+
+test('copy task sheet waits for edits and uses the current server instructions', async t => {
+  const b=await workbench(t,[task('T-copy','Copy current context')]); await b.open('T-copy');
+  b.api.patchGate=deferred(); b.input('#d-goal','Latest saved goal');
+  b.click('[data-act="copy"][data-what="brief"]'); await until(() => b.api.patches.length === 1);
+  assert.equal(b.api.briefs.length,0); assert.equal(b.api.copied.length,0);
+  b.api.patchGate.resolve(); await until(() => b.api.copied.length === 1);
+  assert.match(b.api.copied[0], /Latest saved goal/); assert.match(b.api.copied[0], /update_work_brief/);
+  b.api.patchGate=null; b.api.patchError=new Error('offline'); b.input('#d-goal','Unsaved goal');
+  b.click('[data-act="copy"][data-what="brief"]'); await until(() => b.$('#toast').textContent.includes('任务单未复制'));
+  assert.equal(b.api.briefs.length,1); assert.equal(b.api.copied.length,1);
+});
+
+test('create-and-copy failure preserves the saved task and can retry copying without another creation', async t => {
+  const b=await workbench(t); b.click('[data-act="new-task"]'); b.input('#n-title','Saved despite copy failure');
+  b.api.briefError=new Error('offline'); b.click('[data-act="create"][data-copy="1"]');
+  await until(() => b.$('#d-title') && b.$('#toast').textContent.includes('任务单未复制'));
+  assert.equal(b.docs.size,1); assert.equal(b.api.puts.length,1); assert.equal(b.api.copied.length,0);
+  b.api.briefError=null; b.click('[data-act="copy"][data-what="brief"]'); await until(() => b.api.copied.length === 1);
+  assert.match(b.api.copied[0], /Saved despite copy failure/); assert.equal(b.api.puts.length,1);
 });

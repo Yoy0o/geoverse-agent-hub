@@ -79,6 +79,13 @@ try {
   check(!!id, "task creation persists into Durable Objects SQLite");
   await json(await api(`/api/tasks/${id}/start`, "POST", { branch: `agent/${id}-fixture`, worktree: "/fixture/worktree" }));
   check((await json(await api(`/api/tasks/${id}`))).status === "执行中", "task state transition works");
+  const stageBefore = await json(await api(`/api/tasks/${id}/focus`));
+  const stageReport = '```agent-work-brief\n' + JSON.stringify({ task: id, expectedFingerprint: stageBefore.fingerprint, content: { summary: "Stage transport verified", nextAction: "Continue integration" } }) + '\n```';
+  await json(await api(`/hooks/codex?event=Stop&task=${id}`, "POST", { last_assistant_message: stageReport }));
+  const stageAfter = await json(await api(`/api/tasks/${id}/focus`));
+  check(stageAfter.content.summary === "Stage transport verified" && stageAfter.status === "执行中", "workerd hook updates a milestone without completing the task");
+  check((await json(await api(`/api/tasks/${id}/focus/report`, "POST", { text: stageReport }))).status === "unchanged", "workerd runner replay does not rewrite a milestone");
+  check((await api(`/api/tasks/${id}/focus/report`, "POST", { text: stageReport.replace("Stage transport verified", "Stale milestone") })).status === 409, "workerd rejects stale milestone context");
 
   streamController = new AbortController();
   const stream = await call("/api/stream", { headers: { Authorization: "Bearer " + token }, signal: streamController.signal });

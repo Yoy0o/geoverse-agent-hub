@@ -113,7 +113,7 @@ case "$cmd" in
   run)
     need_id; ag=${3:-claude}; d=$(dir_of); [ -n "$d" ] || { echo "找不到任务 $id 的 worktree，先运行 task.sh start" >&2; exit 1; }
     [ -f "$d/specs/$id.md" ] || write_brief "$d" || true
-    prompt="执行任务 $id：先阅读 specs/$id.md（任务单），按验收标准和允许修改的范围实现；结束前运行 bash scripts/agent/verify.sh，最后按 AGENTS.md 输出交付回执。"
+    prompt="执行任务 $id：先阅读 specs/$id.md（任务单），按验收标准和允许修改的范围实现；有阶段成果时按任务单约定用 get_work_context / update_work_brief 或 hub.sh context / brief 更新短摘要，钩子也支持 agent-work-brief JSON 代码块；结束前运行 bash scripts/agent/verify.sh，最后按 AGENTS.md 输出交付回执。"
     cd "$d"
     case "$ag" in
       claude) exec claude "$prompt" ;;
