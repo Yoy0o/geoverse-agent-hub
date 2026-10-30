@@ -6,6 +6,9 @@
 #   bash scripts/agent/task.sh run <任务编号> <claude|codex|gemini|cursor|kiro|code>   在该任务的 worktree 里启动 Agent
 #   bash scripts/agent/task.sh progress <任务编号> <0-100|-> <步骤>   汇报进度
 #   bash scripts/agent/task.sh status <任务编号>          任务状态与执行情况（在哪里执行、做到哪一步）
+#   bash scripts/agent/task.sh context <任务编号>         读取断点、停止情况与最新指纹
+#   bash scripts/agent/task.sh pause <任务编号> <JSON文件> 保存原因、结论、恢复第一步和插单关系
+#   bash scripts/agent/task.sh resume <任务编号> <JSON文件> 恢复到待执行，不自动启动 Agent
 #   bash scripts/agent/task.sh list                      列出进行中的任务 worktree
 #   bash scripts/agent/task.sh path <任务编号>            输出该任务的 worktree 路径
 #   bash scripts/agent/task.sh brief <任务编号>           从 hub 重新拉取任务单到 specs/<编号>.md
@@ -45,7 +48,16 @@ write_brief(){ # $1=目录
   rm -f "$1/specs/$id.md.tmp"; return 1
 }
 
+if [[ "$cmd" =~ ^(start|attach|run)$ ]] && hub_on; then
+  need_id
+  hub_api GET "/api/tasks/$id" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{if(JSON.parse(s).status==="已暂停"){console.error("任务已暂停，请先恢复并读取断点");process.exit(1)}})'
+fi
 case "$cmd" in
+  context)
+    need_id; hub_api GET "/api/tasks/$id/lifecycle" ;;
+  pause|resume)
+    need_id; file=${3:-}; [ -f "$file" ] || { echo "用法：task.sh $cmd <编号> <JSON文件>" >&2; exit 1; }
+    hub_api POST "/api/tasks/$id/$cmd" "$(cat "$file")" ;;
   new)
     shift; title=${1:-}; [ -n "$title" ] || { echo "用法：task.sh new \"<标题>\" [--risk L2] [--allow 'src/**'] [--budget 60] [--status 待执行]" >&2; exit 1; }; shift
     risk=L2; allow=""; budget=60; status="待执行"
@@ -112,6 +124,7 @@ case "$cmd" in
     ;;
   run)
     need_id; ag=${3:-claude}; d=$(dir_of); [ -n "$d" ] || { echo "找不到任务 $id 的 worktree，先运行 task.sh start" >&2; exit 1; }
+    if hub_on; then hub_start "$d" "$(branch_of)" false || { echo "开工登记失败，请检查 Hub 状态" >&2; exit 1; }; fi
     [ -f "$d/specs/$id.md" ] || write_brief "$d" || true
     prompt="执行任务 $id：先阅读 specs/$id.md（任务单），按验收标准和允许修改的范围实现；有阶段成果时按任务单约定用 get_work_context / update_work_brief 或 hub.sh context / brief 更新短摘要，钩子也支持 agent-work-brief JSON 代码块；结束前运行 bash scripts/agent/verify.sh，最后按 AGENTS.md 输出交付回执。"
     cd "$d"

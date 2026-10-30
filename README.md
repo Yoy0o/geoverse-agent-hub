@@ -2,6 +2,8 @@
 
 P1 阶段成果回传的接入方式、常规任务与插单示例见 [阶段摘要使用指南](docs/P1-STAGE-BRIEFS.md)。
 
+主动切换工作、记录断点和返回原任务见 [暂停与恢复使用指南](docs/P1-PAUSE-RESUME.md)。
+
 自托管的 Agent 工作台：把原来 claude.ai 上的「Agent 工作台」页面搬到自己的机器上，并让各家 coding agent **自动**上报任务状态、交付回执和成本。
 
 - **一个服务**：Node 22 + SQLite，单容器，`docker compose up -d` 即可

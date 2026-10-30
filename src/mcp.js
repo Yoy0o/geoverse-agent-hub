@@ -12,6 +12,7 @@ import { markChannel } from "./ingest.js";
 import { config } from "#hub/config";
 import { startRun, touchFromEvent, reportProgress, dispatch, cancelRun, runsView, runnersView, RUN_ACTIVE, RUN_LABEL, MODE_LABEL } from "./exec.js";
 import { retiredTo, retiredHint } from "./retire.js";
+import { lifecycleView, pauseTask, resumeTask, pauseShape, resumeShape } from "./lifecycle.js";
 
 const text = (s) => ({ content: [{ type: "text", text: String(s) }] });
 const json = (o) => text(JSON.stringify(o, null, 2));
@@ -53,7 +54,7 @@ function build(agent) {
     title: "读取可续接上下文", description: "读取当前结论、相对上次已读的变化、关联工作、依据和完整任务单。返回 expectedFingerprint；更新前需以最新指纹为依据。",
     inputSchema: { id: z.string() }, annotations: { readOnlyHint: true },
   }, async ({ id }) => {
-    try { const v = focus.context(id); log("get_work_context", id); return json({ context: v.brief, expectedFingerprint: v.fingerprint, content: v.content, changes: v.changes, taskBrief: taskBrief(getTask(id)) }); }
+    try { const v = focus.context(id); log("get_work_context", id); return json({ context: v.brief, expectedFingerprint: v.fingerprint, content: v.content, changes: v.changes, lifecycle: lifecycleView(id), taskBrief: taskBrief(getTask(id)) }); }
     catch (e) { if (e.expose) return err(e.message); throw e; }
   });
   server.registerTool("update_work_brief", {
@@ -73,6 +74,19 @@ function build(agent) {
     log("today");
     const running = runsView({ statuses: RUN_ACTIVE, limit: 50 }).map((r) => ({ run: r.id, task: r.task, status: RUN_LABEL[r.health] || r.status, where: (r.location === "cloud" ? "云端" : "本机") + (r.runnerName || r.host ? " · " + (r.runnerName || r.host) : ""), agent: r.agent, progress: r.progress, step: r.step, heartbeatAt: r.heartbeatAt }));
     return json({ attention: attention(ts), running, pendingRules: allRules().filter((r) => r.status === "待写入").length, open: ts.filter((t) => OPEN.includes(t.status)).length, last7d: m });
+  });
+
+  server.registerTool("pause_task", {
+    title: "保存断点并暂停", description: "主动暂停任务，保存原因、当前结论、恢复第一步，可关联已有插单编号。返回 Agent 停止状态；不能把暂停状态当作进程已经停止。先 get_work_context 读取最新指纹。",
+    inputSchema: { id: z.string(), ...pauseShape },
+  }, async ({ id, ...input }) => {
+    try { const v = pauseTask(id, input, agent); log("pause_task", id); return json(v); } catch (e) { if (e.expose) return err(e.message); throw e; }
+  });
+  server.registerTool("resume_task", {
+    title: "恢复任务到待执行", description: "恢复暂停的任务，返回断点；不会启动 Agent。执行端尚未确认停止时拒绝恢复。只有确实在原会话/机器停止外部 Agent 后才传 confirmedExternalStop=true。恢复后读取上下文，再 start_task 或派发。",
+    inputSchema: { id: z.string(), ...resumeShape },
+  }, async ({ id, ...input }) => {
+    try { const v = resumeTask(id, input, agent); log("resume_task", id); return json(v); } catch (e) { if (e.expose) return err(e.message); throw e; }
   });
 
   server.registerTool("list_tasks", {
@@ -149,6 +163,7 @@ function build(agent) {
   }, async (a) => {
     const t = getTask(a.id); if (!t) return err("找不到任务 " + a.id);
     const extra = { agent: t.agent || agentName(agent), branch: t.branch || a.branch || "", session: t.session || a.session || "" };
+    if (t.status === "已暂停") return err("任务已暂停，请先 resume_task 并读取断点");
     if (["待规格", "待执行", "需介入"].includes(t.status)) moveTask(t, "执行中", extra, agent); else patchTask(t.id, extra, agent);
     const run = startRun(getTask(a.id), { location: a.location || (agent === "claude-ai" ? "cloud" : "local"), host: a.host, agent, branch: a.branch, session: a.session }, agent);
     log("start_task", a.id, "开始执行（" + (run.location === "cloud" ? "云端" : "本机") + "）");

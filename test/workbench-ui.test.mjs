@@ -16,7 +16,12 @@ async function workbench(t, initial = []) {
   const dom = new JSDOM(html, { url: 'http://hub.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close());
   const w = dom.window, docs = new Map(initial.map(d => [d.id, structuredClone(d)])), subscribers = new Map();
-  const api = { puts: [], patches: [], briefs: [], copied: [], setGate: null, patchGate: null, failAfterPut: false, patchError: null, briefError: null };
+  const api = { puts: [], patches: [], briefs: [], copied: [], pauses: [], resumes: [], setGate: null, patchGate: null, failAfterPut: false, patchError: null, briefError: null, pauseError: null, pauseGate: null, pauseExecution: null };
+  const lifecycle = id => {
+    const d=docs.get(id);
+    return { id, status:d.status, expectedFingerprint:'a'.repeat(64), summary:d.goal, nextAction:'Run the next experiment', content:{}, checkpoint:d.pauseState||null,
+      execution:d.status==='已暂停'?(api.pauseExecution||{state:'stopped',manual:[],pending:[],message:'没有待停止的执行'}):null };
+  };
   const snapshot = name => ({ docs: name === 'tasks' ? [...docs].map(([id,data]) => ({ id, data: () => structuredClone(data) })) : [] });
   const notify = () => subscribers.get('tasks')?.(snapshot('tasks'));
   const db = {
@@ -43,7 +48,7 @@ async function workbench(t, initial = []) {
   w.structuredClone = structuredClone; w.scrollTo = () => {};
   w.navigator.clipboard = { async writeText(text) { api.copied.push(text); } };
   const caps = { sample: false, version: '0.3.1', hub: { name: 'Test Hub', kind: 'cloud' } };
-  w.hub = { caps: async () => caps, async req(method, url) {
+  w.hub = { caps: async () => caps, async req(method, url, body) {
     if (url.startsWith('/api/docs/tasks/')) {
       const d = docs.get(decodeURIComponent(url.split('/').at(-1)));
       if (!d) throw Object.assign(new Error('not_found'), { status: 404 });
@@ -51,6 +56,18 @@ async function workbench(t, initial = []) {
     }
     if (url === '/api/focus') return { items: [], remaining: [], updates: [], total: docs.size, counts: { attention: 0, updates: 0 } };
     if (url.endsWith('/focus')) throw Object.assign(new Error('No brief in fixture'), { status: 404 });
+    if (url.endsWith('/lifecycle')) return lifecycle(url.split('/').at(-2));
+    if (url.endsWith('/pause')) {
+      const id=url.split('/').at(-2); api.pauses.push({id,body:structuredClone(body)});
+      if(api.pauseGate) await api.pauseGate.promise;
+      if(api.pauseError) throw api.pauseError;
+      const d=docs.get(id); docs.set(id,{...d,status:'已暂停',pauseState:{...body,at:new Date().toISOString()}}); notify(); return lifecycle(id);
+    }
+    if (url.endsWith('/resume')) {
+      const id=url.split('/').at(-2); api.resumes.push({id,body:structuredClone(body)});
+      if(api.pauseExecution?.manual.length && !body.confirmedExternalStop) throw new Error('请先在外部停止 Agent');
+      docs.get(id).status='待执行'; notify(); return lifecycle(id);
+    }
     if (url.endsWith('/brief')) {
       api.briefs.push(url);
       if (api.briefError) throw api.briefError;
@@ -60,7 +77,7 @@ async function workbench(t, initial = []) {
     if (url.startsWith('/api/exec')) return { runners: [], recent: [], active: [] };
     if (url.startsWith('/api/runs')) return [];
     if (url.startsWith('/api/sync')) return { configured: false };
-    if (url.includes('/activity')) return { events: [], sessions: [] };
+    if (url.includes('/activity')) return { events: api.activityEvents || [], sessions: [] };
     return [];
   } };
   w.claude = { async use(name) { if (name === 'db') return db; throw new Error('disabled'); } };
@@ -159,4 +176,46 @@ test('create-and-copy failure preserves the saved task and can retry copying wit
   assert.equal(b.docs.size,1); assert.equal(b.api.puts.length,1); assert.equal(b.api.copied.length,0);
   b.api.briefError=null; b.click('[data-act="copy"][data-what="brief"]'); await until(() => b.api.copied.length === 1);
   assert.match(b.api.copied[0], /Saved despite copy failure/); assert.equal(b.api.puts.length,1);
+});
+
+test('pause checkpoint draft survives realtime rendering and failure, then links the interruption', async t => {
+  const b=await workbench(t,[task('T-main','Navigation'),task('T-urgent','Video fix')]); await b.open('T-main');
+  b.click('[data-act="pause-open"]'); await until(()=>b.$('#pause-reason'));
+  b.input('#pause-reason','Handle urgent video'); b.input('#pause-next','Run two disconnected cases'); b.input('#pause-interruption','T-urgent');
+  b.notify(); await pause(30); assert.equal(b.$('#pause-reason').value,'Handle urgent video');
+  b.api.pauseGate=deferred(); b.click('[data-act="pause-save"]'); await until(()=>b.api.pauses.length===1);
+  assert.equal(b.$('[data-act="pause-save"]').disabled,true);
+  b.api.pauseGate.reject(new Error('offline')); await until(()=>b.$('[role="alert"]')?.textContent.includes('草稿已保留'));
+  assert.equal(b.$('#pause-next').value,'Run two disconnected cases'); assert.equal(b.docs.get('T-main').status,'待执行');
+  b.api.pauseGate=null; b.click('[data-act="pause-save"]'); await until(()=>b.$('[data-act="task-resume"]'));
+  assert.equal(b.docs.get('T-main').status,'已暂停'); assert.equal(b.api.pauses[1].body.interruptedBy,'T-urgent');
+  assert.match(b.$('.drawer').textContent,/恢复第一步：Run two disconnected cases/);
+  b.click('[data-act="close"]'); await b.open('T-urgent'); assert.match(b.$('.drawer').textContent,/插单处理后可返回/);
+});
+
+test('resume UI distinguishes runner acknowledgement from explicitly confirmed external stop', async t => {
+  const paused={...task('T-paused','Paused task'),status:'已暂停',pauseState:{reason:'Interrupt',summary:'Checked topology',nextAction:'Repair gap'},exec:{run:'run-1',status:'running',cancel:true,mode:'exec',location:'local'}};
+  const b=await workbench(t,[paused]); b.api.pauseExecution={state:'stopping',pending:['run-1'],manual:[],message:'等待执行端确认停止'};
+  await b.open('T-paused'); await until(()=>b.$('.drawer').textContent.includes('等待执行端确认停止'));
+  assert.equal(b.$('[data-act="task-resume"]').disabled,true);
+  assert.equal(b.$('.h-stopping').textContent,'等待停止确认');
+  b.api.pauseExecution={state:'external',pending:[],manual:['run-1'],message:'请在原会话停止 Agent'};
+  b.click('[data-act="lifecycle-refresh"]'); await until(()=>b.$('#pause-external-stopped'));
+  b.click('[data-act="task-resume"]'); await until(()=>b.api.resumes.length===1 && !b.$('[data-act="task-resume"]').disabled);
+  assert.equal(b.docs.get('T-paused').status,'已暂停'); assert.equal(b.api.resumes[0].body.confirmedExternalStop,false);
+  b.click('#pause-external-stopped'); b.click('[data-act="task-resume"]'); await until(()=>b.$('#toast').textContent.includes('已恢复到待执行'));
+  assert.equal(b.api.resumes[1].body.confirmedExternalStop,true); assert.equal(b.api.puts.length,0);
+});
+
+
+test('archived receipts stay collapsed and separate from current work, with escaped content', async t => {
+  const current={...task('T-archive','Current task'),receipt:{summary:'Current result'}};
+  const b=await workbench(t,[current]);
+  b.api.activityEvents=[{seq:42,kind:'receipt_late',at:new Date().toISOString(),agent:'codex',summary:'Retired output',receipt:{summary:'Old <img src=x onerror=alert(1)>',changed:['old.js'],verify:[{cmd:'old-check',result:'pass'}]}}];
+  await b.open('T-archive'); await until(()=>b.$('.archived-receipt'));
+  assert.equal(b.$('.archived-receipt').open,false);
+  assert.match(b.$('.archived-receipt pre').textContent,/Old <img/);
+  assert.equal(b.$('.archived-receipt img'),null);
+  assert.match(b.$('.archived-receipt').textContent,/不代表当前执行的成果/);
+  assert.equal(b.docs.get('T-archive').receipt.summary,'Current result');
 });

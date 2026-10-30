@@ -1,11 +1,12 @@
 // 任务领域逻辑：与界面里的规则保持一致（状态流、回执解析、任务单生成、指标）
 import crypto from "node:crypto";
-import { getDoc, setDoc, updateDoc, listDocs } from "#hub/db";
+import { getDoc, setDoc, updateDoc, listDocs, getRun, addEvent } from "#hub/db";
 import { config } from "#hub/config";
 import { WORK_BRIEF_GUIDE, workContext } from "./work-brief.js";
+import { activeMs } from "./task-time.js";
 
-export const STATUSES = ["待规格", "待执行", "执行中", "需介入", "待评审", "已合并", "已放弃"];
-export const OPEN = ["待规格", "待执行", "执行中", "需介入", "待评审"];
+export const STATUSES = ["待规格", "待执行", "执行中", "已暂停", "需介入", "待评审", "已合并", "已放弃"];
+export const OPEN = ["待规格", "待执行", "执行中", "已暂停", "需介入", "待评审"];
 export const RISKS = ["L1", "L2", "L3", "L4"];
 export const REASONS = ["规格不清", "上下文缺失", "越界改动", "验证不足", "设计问题", "代码质量", "安全隐患", "Agent 能力不足"];
 export const TARGETS = ["AGENTS.md", "CLAUDE.md", ".cursor/rules", "评审清单", "验证脚本", "任务单模板"];
@@ -75,7 +76,8 @@ export function patchTask(id, patch, origin = "hub") {
   patch.updatedAt = nowIso();
   return updateDoc("tasks", id, patch, origin);
 }
-export function moveTask(t, to, extra, origin = "hub") {
+export function moveTask(t, to, extra, origin = "hub", lifecycle = false) {
+  if (!lifecycle && (t.status === "已暂停" || to === "已暂停")) throw Object.assign(new Error("暂停或恢复请使用 pause_task / resume_task，并保存断点"), { status: 409, expose: true });
   const at = nowIso();
   const patch = Object.assign({ status: to, history: (t.history || []).concat([{ at, from: t.status, to, by: origin }]).slice(-40) }, extra || {});
   if (to === "执行中" && !t.startedAt) patch.startedAt = at;
@@ -164,10 +166,16 @@ export function receiptPatch(t, r, by) {
 }
 export function scopeOk(s) { return !s || /^(ok|无|none|没有)$/i.test(String(s).trim()); }
 // 写入回执并推进状态；同一个回执（hash 相同）重复到达时忽略
-export function applyReceipt(t, r, origin = "hub") {
+export function applyReceipt(t, r, origin = "hub", runId = "") {
+  const source = runId ? getRun(runId) : null;
+  if (source?.task === t.id && source.cancel && t.status !== "已暂停") {
+    addEvent({ agent: origin, kind: "receipt_late", task: t.id, summary: "旧执行回执已保留，未覆盖当前工作：" + (r.summary || "").slice(0, 120), data: { run: runId, receipt: r } });
+    return { skipped: true, task: t };
+  }
   if (r.hash && t.receipt && t.receipt.hash === r.hash) return { skipped: true, task: t };
   const { patch, to } = receiptPatch(t, r, origin);
-  const d = ["待评审", "已合并", "已放弃"].includes(t.status) ? patchTask(t.id, patch, origin) : moveTask(t, to, patch, origin);
+  const keepStatus = ["已暂停", "待评审", "已合并", "已放弃"].includes(t.status) || (t.status === "待执行" && t.pauseState?.resumedAt);
+  const d = keepStatus ? patchTask(t.id, patch, origin) : moveTask(t, to, patch, origin);
   return { skipped: false, to: d.data.status, task: Object.assign({}, d.data, { id: t.id }) };
 }
 
@@ -245,6 +253,7 @@ export function metrics(tasks, s, e) {
 }
 // 执行摘要（task.exec）超过阈值没有心跳：Agent 可能卡住、会话已结束但没交付，或机器已关机
 export function stalled(t, now = Date.now()) {
+  if (t.status === "已暂停") return false;
   const e = t.exec;
   if (!e || !["claimed", "ready", "running"].includes(e.status) || !OPEN.includes(t.status)) return false;
   const last = Date.parse(e.heartbeatAt || e.startedAt || e.at) || 0;
@@ -258,8 +267,8 @@ export function attention(tasks) {
     if (t.status === "需介入") items.push({ id: t.id, title: t.title, level: "需介入", since: lastEntered(t, "需介入") || t.updatedAt, agent: t.agent, project: t.project });
     else if (t.status === "待评审") items.push({ id: t.id, title: t.title, level: "待评审", since: lastEntered(t, "待评审") || t.updatedAt, waitMin: Math.round((now - new Date(lastEntered(t, "待评审") || t.updatedAt || t.createdAt)) / 60000), agent: t.agent, project: t.project });
     else if (stalled(t, now)) items.push({ id: t.id, title: t.title, level: "执行停滞", since: t.exec.heartbeatAt || t.exec.at, idleMin: Math.round((now - Date.parse(t.exec.heartbeatAt || t.exec.at)) / 60000), where: execWhere(t.exec), agent: t.agent, project: t.project });
-    else if (t.exec && t.exec.status === "queued" && OPEN.includes(t.status) && now - Date.parse(t.exec.at || t.updatedAt) > 30 * 60000) items.push({ id: t.id, title: t.title, level: "派发未领取", since: t.exec.at, agent: t.agent, project: t.project });
-    else if (t.status === "执行中" && num(t.budgetMin) && t.startedAt) { const run = (now - new Date(t.startedAt)) / 60000; if (run > num(t.budgetMin)) items.push({ id: t.id, title: t.title, level: "超出时长预算", runMin: Math.round(run), budgetMin: t.budgetMin, agent: t.agent, project: t.project }); }
+    else if (t.status !== "已暂停" && t.exec && t.exec.status === "queued" && OPEN.includes(t.status) && now - Date.parse(t.exec.at || t.updatedAt) > 30 * 60000) items.push({ id: t.id, title: t.title, level: "派发未领取", since: t.exec.at, agent: t.agent, project: t.project });
+    else if (t.status === "执行中" && num(t.budgetMin)) { const run = activeMs(t, now) / 60000; if (run > num(t.budgetMin)) items.push({ id: t.id, title: t.title, level: "超出时长预算", runMin: Math.round(run), budgetMin: t.budgetMin, agent: t.agent, project: t.project }); }
   });
   const order = { "需介入": 0, "待评审": 1, "执行停滞": 2, "派发未领取": 3, "超出时长预算": 4 };
   return items.sort((a, b) => order[a.level] - order[b.level] || (b.waitMin || 0) - (a.waitMin || 0));

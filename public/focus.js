@@ -38,6 +38,7 @@
       if (field === "evidence") return value.map((e) => `${e.label} ${e.url}${e.version ? " @ " + e.version : ""}`).join("\n") || "无链接";
       if (field === "delivery") return [value.summary, value.version && "提交：" + value.version, value.pr, ...(value.changed || []), ...(value.verify || []).map((v) => `${v.cmd}：${v.result}`)].filter(Boolean).join("\n") || "尚无回执";
       if (field === "checks") return [value.ok == null ? "尚未检查" : value.ok ? "上报检查通过" : "上报检查未通过", ...(value.verify || []).map((v) => `${v.cmd}：${v.result}`), ...(value.outOfScope || []).map((s) => "越界：" + s)].join("\n");
+      if (field === "checkpoint") return ["暂停原因：" + value.reason, "当时结论：" + value.summary, "恢复第一步：" + value.nextAction, value.interruption ? "插单：" + value.interruption.title + " · " + value.interruption.status : "无插单"].join("\n");
       if (field === "requirements") return [value.goal, "允许：" + (value.allow || "未限定"), "禁止：" + (value.deny || "无额外限制"), ...(value.acceptance || []).map((a) => (a.done ? "已勾选：" : "待验证：") + a.text), "规格版本：" + value.specFingerprint.slice(0, 10)].join("\n");
       return "内容已更新";
     }
@@ -74,7 +75,7 @@
       const heading = surface === 'drawer' ? '<h3>当前工作摘要</h3>' : '<button class="focus-title" data-act="open" data-id="' + esc(v.id) + '">' + esc(v.title) + '</button>';
       return '<article class="focus-card' + (s.risk || hasMissing || ['需介入', '验证未通过'].includes(v.reason) ? ' focus-warning' : '') + '"><div class="focus-heading">' + heading + '<span class="pill">' + esc(v.needsDecision ? '待决策' : v.reason || s.status) + '</span></div>' +
         '<p class="focus-meta">' + esc(v.project || '未指定项目') + ' · ' + (v.unread ? v.firstRead ? '首次阅读' : '新增变化：' + esc(v.changes.map((c) => c.label).join('、')) : '没有未读变化') + '</p>' +
-        line('当前结论', s.summary) + (v.needsDecision ? line('需要决定', s.decision) + line('推荐动作', s.recommendation) : line('下一步', s.nextAction)) +
+        line('当前结论', s.summary) + (v.needsDecision ? line('需要决定', s.decision) + line('推荐动作', s.recommendation) : line(s.status === '已暂停' ? '恢复第一步' : '下一步', s.nextAction)) +
         line('风险 / 未决', risk, 'bad') + (risk !== s.risk ? '<details class="more focus-details" id="focus-risk-' + surface + '-' + esc(v.id) + '"><summary>查看完整风险与未决项</summary><pre>' + esc(s.risk) + '</pre></details>' : '') + (v.reason === '验证未通过' ? '<p class="bad">存在未通过的验证或范围检查，展开依据查看。</p>' : '') + (hasMissing ? '<p class="bad">关联任务已不存在，请核对引用。</p>' : '') + (v.resolutionStale && s.decision ? '<p class="bad">先前决定的依据已变化，请重新核对。</p>' : '') +
         (v.decisionResolved ? '<p class="small ok">已采纳当前建议，任务仍按原流程验收。</p>' : '') +
         (v.resolution?.action === 'revise' ? line('调整要求', v.resolution.note) : '') + details(v, surface) +

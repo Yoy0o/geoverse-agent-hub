@@ -9,6 +9,7 @@ const invalid = (message) => Object.assign(new Error(message), { status: 400, ex
 
 export const WORK_BRIEF_GUIDE = [
   "## 阶段成果：自动维护同一张短摘要卡",
+  "遇到临时插单或主动暂停：先读取 get_work_context，再用 pause_task 保存原因、结论、恢复第一步和已有插单编号；脚本用 task.sh pause。暂停不等于 Agent 进程已停止，按返回的 execution 提示处理。恢复用 resume_task / task.sh resume 回到待执行，读取断点后另行开工；已暂停时禁止靠心跳或 start_task 自动重启。",
   "开工、恢复工作和每次写摘要前，先用 get_work_context 或 bash scripts/agent/hub.sh context 读取最新上下文及 expectedFingerprint。任务单内的指纹只是生成时快照，不能长期复用。",
   "仅在形成结论、完成阶段验证、出现阻塞或需要人决定时更新；普通读文件、心跳、无实质变化不更新。summary ≤280字，nextAction ≤200字且能直接执行；decision ≤160字、recommendation ≤200字，只在确实需要人判断时填写。risk ≤280字，evidence 提供真实 HTTP(S) 链接和已知版本，relations 只关联已确认存在的任务。未知验证写 unknown。",
   "优先调用 update_work_brief(id, expectedFingerprint, content)。没有 MCP 时，保存 {expectedFingerprint,content} 为 JSON，再运行 bash scripts/agent/hub.sh brief <JSON文件>。content 是完整替换，保留仍有效的证据、关系和未决事项。409 时重新读上下文并核对变化，禁止只换指纹强行覆盖。",

@@ -7,6 +7,7 @@ import {
 } from "./domain.js";
 import { createFocusService } from "./focus.js";
 import { receiveWorkBrief } from "./work-brief.js";
+import { lifecycleView, pauseTask, resumeTask } from "./lifecycle.js";
 import { ingest, channels } from "./ingest.js";
 import { execMeta } from "./hooks.js";
 import {
@@ -54,10 +55,13 @@ export function apiRoutes(app, auth) {
   app.put("/api/docs/:coll/:id", auth, (req, res) => {
     const { coll, id } = req.params; if (!validColl(coll) || !validId(id)) return bad(res, "bad path");
     if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) return bad(res, "body must be an object");
+    if (coll === "tasks" && (getTask(id)?.status === "已暂停" || req.body.status === "已暂停" || "pauseState" in req.body || "workClock" in req.body)) return bad(res, "暂停任务请用专用暂停/恢复接口；计时与断点由 Hub 维护", 409);
     res.json(setDoc(coll, id, req.body, who(req)));
   });
   app.patch("/api/docs/:coll/:id", auth, (req, res) => {
     const { coll, id } = req.params; if (!validColl(coll) || !validId(id)) return bad(res, "bad path");
+    if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) return bad(res, "body must be an object");
+    if (coll === "tasks" && ("pauseState" in (req.body || {}) || "workClock" in (req.body || {}) || ("status" in (req.body || {}) && (getTask(id)?.status === "已暂停" || req.body.status === "已暂停")))) return bad(res, "暂停或恢复请使用专用接口，保留断点与执行确认", 409);
     const d = updateDoc(coll, id, req.body || {}, who(req)); d ? res.json(d) : res.status(404).json({ error: "not_found" });
   });
   app.delete("/api/docs/:coll/:id", auth, (req, res) => {
@@ -84,6 +88,9 @@ export function apiRoutes(app, auth) {
   });
 
   /* ---------- 任务（task.sh、脚本、网页共用） ---------- */
+  app.get("/api/tasks/:id/lifecycle", auth, handle(req => lifecycleView(req.params.id)));
+  app.post("/api/tasks/:id/pause", auth, handle(req => pauseTask(req.params.id, req.body, who(req))));
+  app.post("/api/tasks/:id/resume", auth, handle(req => resumeTask(req.params.id, req.body, who(req))));
   app.get("/api/focus", auth, handle((req) => focus.list({ limit: req.query.limit })));
   app.get("/api/tasks/:id/focus/context", auth, handle((req) => focus.context(req.params.id)));
   app.get("/api/tasks/:id/focus", auth, handle((req) => focus.get(req.params.id)));
@@ -100,6 +107,7 @@ export function apiRoutes(app, auth) {
   });
   app.post("/api/tasks", auth, (req, res) => {
     const b = req.body || {};
+    if (b.status === "已暂停") return bad(res, "先创建任务，再保存断点并暂停");
     if (!b.title || !String(b.title).trim()) return bad(res, "title required");
     const pj = b.project ? projByName(b.project) : projByRepo(b.repo);
     const id = newTaskId();
@@ -118,6 +126,7 @@ export function apiRoutes(app, auth) {
   // task.sh start / attach、执行端：进入执行中，记录分支 / worktree / 执行位置，返回任务单和执行记录
   app.post("/api/tasks/:id/start", auth, handle((req) => {
     const t = taskOr404(req.params.id);
+    if (t.status === "已暂停") throw Object.assign(new Error("任务已暂停，请先恢复并读取断点"), { status: 409, expose: true });
     const b = req.body || {}; const m = execMeta(req);
     const extra = { branch: b.branch || t.branch || "", worktree: b.worktree || t.worktree || "" };
     if (b.agent) extra.agent = agentName(b.agent);
@@ -167,13 +176,15 @@ export function apiRoutes(app, auth) {
     // 原文优先按代码块提取（带指纹，钩子和执行端重复送达同一回执时只写一次）
     const r = typeof b.text === "string" ? findReceipt(b.text) || parseReceipt(b.text) : normReceipt(b);
     if (!r) return bad(res, "没有识别到回执");
-    const out = applyReceipt(t, r, who(req));
+    const out = applyReceipt(t, r, who(req), execMeta(req).run);
     ingest({ agent: who(req), kind: "receipt", event: "receipt", query: { task: t.id }, summary: "回执：" + (r.summary || "").slice(0, 120) + " → " + out.task.status });
     res.json({ task: out.task });
   });
   app.get("/api/tasks/:id/activity", auth, (req, res) => {
     const id = req.params.id;
-    res.json({ events: listEvents({ task: id, limit: Number(req.query.limit) || 60 }), sessions: sessionsForTask(id) });
+    const events = listEvents({ task: id, limit: Number(req.query.limit) || 60, withData: req.query.includeReceipts === "1" })
+      .map(({ data, ...e }) => e.kind === "receipt_late" && data?.receipt ? { ...e, receipt: data.receipt, run: data.run } : e);
+    res.json({ events, sessions: sessionsForTask(id) });
   });
 
   /* ---------- git 钩子 / 任意脚本上报事件 ---------- */
@@ -278,7 +289,7 @@ export function importBackup(data, origin = "import") {
   const tasks = Array.isArray(data.tasks) ? data.tasks : [], rules = Array.isArray(data.rules) ? data.rules : [], retros = Array.isArray(data.retros) ? data.retros : [];
   transaction(() => {
     if (data.config) setDoc("config", "main", normalizeConfig(data.config), origin);
-    for (const t of tasks) if (t && t.id && validId(String(t.id))) setDoc("tasks", String(t.id), t, origin);
+    for (const t of tasks) if (t && t.id && validId(String(t.id))) setDoc("tasks", String(t.id), t, origin, { restore: true });
     for (const r of rules) if (r && r.id && validId(String(r.id))) setDoc("rules", String(r.id), r, origin);
     for (const r of retros) if (r && r.id && validId(String(r.id))) setDoc("retros", String(r.id), r, origin);
   });

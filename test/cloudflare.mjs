@@ -108,7 +108,7 @@ try {
   const client = new Client({ name: "cloudflare-test", version: "1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(base + "/mcp"), { requestInit: { headers: { Authorization: "Bearer " + token } } }));
   const toolNames = (await client.listTools()).tools.map(t => t.name).sort();
-  const expectedTools = ["today", "list_tasks", "get_task", "create_task", "update_task", "start_task", "report_progress", "dispatch_task", "list_runs", "cancel_run", "submit_receipt", "move_task", "list_rules", "add_rule", "get_project", "log_note", "task_usage", "get_focus", "get_work_context", "update_work_brief"].sort();
+  const expectedTools = ["today", "list_tasks", "get_task", "create_task", "update_task", "start_task", "report_progress", "dispatch_task", "list_runs", "cancel_run", "submit_receipt", "move_task", "list_rules", "add_rule", "get_project", "log_note", "task_usage", "get_focus", "get_work_context", "update_work_brief", "pause_task", "resume_task"].sort();
   check(toolNames.length === expectedTools.length && expectedTools.every((name, i) => toolNames[i] === name), "MCP SDK initializes with the complete tool inventory in workerd");
   check((await client.callTool({ name: "get_task", arguments: { id } })).content[0].text.includes(id), "MCP reads shared SQLite task state");
   const context = JSON.parse((await client.callTool({ name: "get_work_context", arguments: { id } })).content[0].text);
@@ -136,6 +136,13 @@ try {
   check(claimed.run && claimed.run.id === dispatched.run.id && claimed.run.location === "cloud", "runner claims the queued run atomically");
   await json(await api(`/api/runs/${claimed.run.id}/update`, "POST", { status: "running", step: "codex 运行中" }));
   check((await json(await api("/api/exec"))).active.some(r => r.id === claimed.run.id && r.health === "running"), "execution overview reports live runs and runner health");
+  const beforePause = await json(await api(`/api/tasks/${id}/lifecycle`));
+  const paused = await json(await api(`/api/tasks/${id}/pause`, "POST", { expectedFingerprint: beforePause.expectedFingerprint, reason: "Workerd checkpoint", summary: "Durable work context", nextAction: "Run the next experiment" }));
+  check(paused.status === "已暂停" && paused.execution.state === "stopping", "pause checkpoints persist and wait for runner acknowledgement in workerd");
+  check((await api(`/api/tasks/${id}/resume`, "POST", { expectedFingerprint: paused.expectedFingerprint })).status === 409, "resume cannot bypass pending execution stop");
+  await json(await api(`/api/runs/${claimed.run.id}/update`, "POST", { status: "cancelled", exitCode: 143 }));
+  const resumed = await json(await api(`/api/tasks/${id}/resume`, "POST", { expectedFingerprint: paused.expectedFingerprint }));
+  check(resumed.status === "待执行" && resumed.activeMs === paused.activeMs, "resume preserves active time and does not start a process in workerd");
   // 多端同步：对端接口在 workerd 中可用
   const info = await json(await api("/api/sync/info"));
   const changes = await json(await api(`/api/sync/changes?since=-1&peer=fixture-peer`));
@@ -161,6 +168,8 @@ try {
   check((await json(await api(`/api/tasks/${id}`))).goal === "broadcast fixture", "SQLite data survives runtime restart");
   const persistedWork = await json(await api(focusPath));
   check(persistedWork.content.summary === "Durable work context" && persistedWork.readAt && persistedWork.resolution?.action === "accept", "work brief, reading state and decision survive runtime restart");
+  const persistedLifecycle = await json(await api(`/api/tasks/${id}/lifecycle`));
+  check(persistedLifecycle.checkpoint.reason === "Workerd checkpoint" && persistedLifecycle.checkpoint.resumedAt && persistedLifecycle.activeMs === paused.activeMs, "checkpoint and stopped workflow clock survive backup and runtime restart");
   check((await call("/api/tasks", { headers: { Cookie: cookie } })).status === 200, "stored browser session survives runtime restart");
   const logoutStream = await call("/api/stream", { headers: { Cookie: cookie } });
   const logoutReader = logoutStream.body.getReader();
