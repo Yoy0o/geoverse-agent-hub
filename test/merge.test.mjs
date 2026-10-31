@@ -2,8 +2,30 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mergeTask, mergeConfig, resolveConflict } from "../src/merge.js";
+import { versionReceipt, deliveryContext, requirementsHash } from "../src/delivery.js";
 
 const h = (at, from, to) => ({ at, from, to });
+
+test('sync retains independent delivery facts without transferring an old review to a newer version',()=>{
+  const base={id:'T-sync',status:'待评审',goal:'Routing',acceptance:[],history:[]};
+  const first=versionReceipt(base,{summary:'First',version:'v1',status:'done',verify:[],scope:'ok'},'local');
+  first.revision.at=first.patch.receipt.at='2026-10-30T09:00:00Z';
+  const local={...base,...first.patch,status:'已合并',history:[h('2026-10-30T10:00:00Z','待评审','已合并')],deliveryReviews:[{id:'R-1',at:'2026-10-30T10:00:00Z',action:'merge',deliveryId:first.revision.id,requirementsHash:requirementsHash(base),checkId:''}]};
+  const second=versionReceipt({...base,...first.patch},{summary:'Second',version:'v2',status:'done',verify:[],scope:'ok'},'remote');
+  second.patch.receipt.at='2026-10-31T10:00:00Z';second.revision.at=second.patch.receipt.at;
+  const remote={...base,...second.patch,deliveryChecks:[{id:'C-1',at:'2026-10-31T10:00:00Z',version:'v2',requirementsHash:requirementsHash(base),ok:true}]};
+  const merged=mergeTask(local,remote,'2026-10-30T10:00:00Z','2026-10-31T10:00:00Z');
+  assert.equal(merged.deliveries.length,2);assert.equal(merged.deliveryReviews.length,1);assert.equal(merged.deliveryChecks.length,1);
+  assert.equal(merged.currentDelivery,second.revision.id);assert.equal(deliveryContext(merged).accepted,false);
+  assert.deepEqual(mergeTask(remote,local,'2026-10-31T10:00:00Z','2026-10-30T10:00:00Z').deliveries,merged.deliveries);
+});
+
+test('a later unrelated edit cannot restore the old running clock over a paused checkpoint',()=>{
+  const paused={status:'已暂停',history:[h('2026-10-30T10:00:00Z','执行中','已暂停')],workClock:{activeMs:5000,runningSince:null},pauseState:{summary:'Saved checkpoint'}};
+  const active={status:'执行中',history:[],title:'Later title',workClock:{activeMs:0,runningSince:'2026-10-30T09:00:00Z'}};
+  const merged=mergeTask(paused,active,'2026-10-30T10:00:00Z','2026-10-30T11:00:00Z');
+  assert.equal(merged.status,'已暂停');assert.deepEqual(merged.workClock,paused.workClock);assert.deepEqual(merged.pauseState,paused.pauseState);
+});
 
 test("a newer read marker cannot overwrite another peer's newer work summary", () => {
   const local = { status: "执行中", focus: { content: { summary: "New conclusion" }, updatedAt: "2026-10-27T10:00:00Z", read: { at: "2026-10-27T08:00:00Z", fingerprint: "old" } } };

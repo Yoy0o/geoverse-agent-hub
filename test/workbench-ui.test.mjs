@@ -16,7 +16,7 @@ async function workbench(t, initial = []) {
   const dom = new JSDOM(html, { url: 'http://hub.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close());
   const w = dom.window, docs = new Map(initial.map(d => [d.id, structuredClone(d)])), subscribers = new Map();
-  const api = { puts: [], patches: [], briefs: [], copied: [], pauses: [], resumes: [], setGate: null, patchGate: null, failAfterPut: false, patchError: null, briefError: null, pauseError: null, pauseGate: null, pauseExecution: null };
+  const api = { puts: [], patches: [], briefs: [], copied: [], pauses: [], resumes: [], reviews: [], receipts: [], setGate: null, patchGate: null, failAfterPut: false, patchError: null, briefError: null, pauseError: null, pauseGate: null, pauseExecution: null };
   const lifecycle = id => {
     const d=docs.get(id);
     return { id, status:d.status, expectedFingerprint:'a'.repeat(64), summary:d.goal, nextAction:'Run the next experiment', content:{}, checkpoint:d.pauseState||null,
@@ -57,6 +57,24 @@ async function workbench(t, initial = []) {
     if (url === '/api/focus') return { items: [], remaining: [], updates: [], total: docs.size, counts: { attention: 0, updates: 0 } };
     if (url.endsWith('/focus')) throw Object.assign(new Error('No brief in fixture'), { status: 404 });
     if (url.endsWith('/lifecycle')) return lifecycle(url.split('/').at(-2));
+    if (url.includes('/delivery')) {
+      const id=url.split('/')[3], result=structuredClone(api.delivery || {task:id,selected:null,versions:[],expectedFingerprint:'f'.repeat(64),blockers:[],warnings:[],reviews:[]});
+      if(api.deliveryGate) await api.deliveryGate.promise;
+      return result;
+    }
+    if (url.endsWith('/review')) {
+      const id=url.split('/').at(-2); api.reviews.push({id,body:structuredClone(body)});
+      if(api.reviewGate) await api.reviewGate.promise;
+      if(api.reviewError) throw api.reviewError;
+      docs.get(id).status=body.action==='merge'?'已合并':body.action==='rework'?'执行中':'已放弃';
+      if(api.delivery) api.delivery.accepted=body.action==='merge';
+      notify(); return {task:structuredClone(docs.get(id))};
+    }
+    if (url.endsWith('/receipt')) {
+      const id=url.split('/').at(-2);api.receipts.push({id,body:structuredClone(body)});
+      if(api.receiptError) throw api.receiptError;
+      docs.get(id).receipt={summary:'Saved new delivery'};notify();return {task:structuredClone(docs.get(id))};
+    }
     if (url.endsWith('/pause')) {
       const id=url.split('/').at(-2); api.pauses.push({id,body:structuredClone(body)});
       if(api.pauseGate) await api.pauseGate.promise;
@@ -82,7 +100,7 @@ async function workbench(t, initial = []) {
   } };
   w.claude = { async use(name) { if (name === 'db') return db; throw new Error('disabled'); } };
   w.localStorage.setItem('awb.tab','board');
-  w.eval(source('task-edits.js')); w.eval(source('focus.js'));
+  w.eval(source('task-edits.js')); w.eval(source('focus.js')); w.eval(source('delivery.js'));
   w.eval(html.match(/<script>\s*([\s\S]*?)<\/script>/)[1]);
   await until(() => w.document.querySelector('#sync').textContent.includes('已连接'));
   const $ = s => w.document.querySelector(s);
@@ -218,4 +236,44 @@ test('archived receipts stay collapsed and separate from current work, with esca
   assert.equal(b.$('.archived-receipt img'),null);
   assert.match(b.$('.archived-receipt').textContent,/不代表当前执行的成果/);
   assert.equal(b.docs.get('T-archive').receipt.summary,'Current result');
+});
+
+function deliveryFixture(id,version='v1'){
+  const selected={id:'D-'+version,version,at:'2026-10-30T10:00:00Z',by:'codex',receipt:{summary:'Result '+version,changed:['route.js'],verify:[{cmd:'route test',result:'pass'}],scope:'ok',risks:'无'},requirements:{acceptance:['Route priority','Disconnected case']}};
+  return {task:id,status:'待评审',currentId:selected.id,expectedFingerprint:(version==='v1'?'a':'b').repeat(64),selected,versions:[{...selected,number:1,current:true,summary:selected.receipt.summary}],reviews:[],blockers:[],warnings:[],canReview:true,accepted:false,difference:{first:true}};
+}
+test('review binds explicit criteria, keeps its draft across SSE and failed saves, and prevents duplicate submissions',async t=>{
+  const id='T-review',initial={...task(id,'Review result'),status:'待评审',acceptance:[{text:'Route priority',done:true},{text:'Disconnected case',done:true}]};
+  const b=await workbench(t,[initial]);b.api.delivery=deliveryFixture(id);await b.open(id);
+  b.click('[data-to="__merge"]');await until(()=>b.$('#rv-note'));
+  assert.equal(b.$('#rv-criterion-0').checked,false,'progress completion is not acceptance');
+  b.input('#rv-note','Verified both route cases');b.click('#rv-criterion-0');b.click('#rv-criterion-1');b.click('#rv-verified');
+  b.notify();await pause(40);assert.equal(b.$('#rv-note').value,'Verified both route cases');assert.equal(b.$('#rv-criterion-0').checked,true);
+  b.api.reviewGate=deferred();b.click('[data-act="rv-confirm"]');await until(()=>b.api.reviews.length===1);
+  assert.equal(b.$('[data-act="rv-confirm"]').disabled,true);b.click('[data-act="rv-confirm"]');assert.equal(b.api.reviews.length,1);
+  b.api.reviewGate.reject(new Error('offline'));await until(()=>b.$('[role="alert"]')?.textContent.includes('草稿已保留'));
+  assert.equal(b.$('#rv-note').value,'Verified both route cases');assert.equal(b.docs.get(id).status,'待评审');
+  b.api.reviewGate=null;b.click('[data-act="rv-confirm"]');await until(()=>b.$('#toast').textContent.includes('本版验收已保存'));
+  assert.equal(b.api.reviews[1].body.expectedDeliveryId,'D-v1');assert.deepEqual(b.api.reviews[1].body.acceptedCriteria,[0,1]);assert.equal(b.api.reviews[1].body.verificationConfirmed,true);
+});
+test('changed delivery requires rereading and new confirmations while retaining review notes',async t=>{
+  const id='T-stale';const b=await workbench(t,[{...task(id,'Stale review'),status:'待评审'}]);b.api.delivery=deliveryFixture(id);await b.open(id);
+  b.click('[data-to="__merge"]');await until(()=>b.$('#rv-note'));b.input('#rv-note','Keep my review notes');b.click('#rv-criterion-0');b.click('#rv-verified');
+  b.api.delivery=deliveryFixture(id,'v2');b.notify();await until(()=>b.$('.review').textContent.includes('成果或依据已变化'));
+  assert.equal(b.$('[data-act="rv-confirm"]').disabled,true);b.click('[data-act="review-reload"]');await until(()=>b.$('.review').textContent.includes('D-v2'));
+  assert.equal(b.$('#rv-note').value,'Keep my review notes');assert.equal(b.$('#rv-criterion-0').checked,false);assert.equal(b.$('#rv-verified').checked,false);
+});
+test('an older delivery read cannot overwrite a newer server response',async t=>{
+  const id='T-order';const b=await workbench(t,[task(id,'Ordered reads')]);b.api.delivery=deliveryFixture(id);await b.open(id);await until(()=>b.$('#delivery-choice'));
+  const gate=deferred();b.api.deliveryGate=gate;b.click('[data-act="delivery-refresh"]');await pause(20);
+  b.api.deliveryGate=null;b.api.delivery=deliveryFixture(id,'v2');b.notify();await until(()=>b.$('#delivery-choice').value==='D-v2');
+  gate.resolve();await pause(40);assert.equal(b.$('#delivery-choice').value,'D-v2');
+});
+test('pasted receipts use the version endpoint and retain text after a failed save',async t=>{
+  const id='T-paste';const b=await workbench(t,[task(id,'Paste receipt')]);await b.open(id);
+  b.input('#d-receipt','summary: Draft result\nversion: commit-v1');b.api.receiptError=new Error('offline');b.click('[data-act="d-receipt"]');
+  await until(()=>b.$('[role="alert"]')?.textContent.includes('回执草稿已保留'));b.notify();await pause(40);
+  assert.match(b.$('#d-receipt').value,/Draft result/);assert.equal(b.api.patches.length,0);
+  b.api.receiptError=null;b.click('[data-act="d-receipt"]');await until(()=>b.$('#toast').textContent.includes('成果版本已保存'));
+  assert.equal(b.api.receipts.length,2);assert.equal(b.$('#d-receipt').value,'');
 });

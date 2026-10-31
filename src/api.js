@@ -3,11 +3,12 @@ import { bus, validColl, validId, getDoc, listDocs, setDoc, updateDoc, deleteDoc
 import { config, hubBaseUrl } from "#hub/config";
 import {
   STATUSES, AGENT_NAMES, agentName, getTask, allTasks, getConfig, normalizeConfig, projByName, projByRepo, newTaskId, newTaskDoc, moveTask, patchTask,
-  reviewTask, applyReceipt, parseReceipt, findReceipt, normReceipt, taskBrief, attention,
+  reviewTask, selectDelivery, applyReceipt, parseReceipt, findReceipt, normReceipt, taskBrief, attention,
 } from "./domain.js";
 import { createFocusService } from "./focus.js";
 import { receiveWorkBrief } from "./work-brief.js";
 import { lifecycleView, pauseTask, resumeTask } from "./lifecycle.js";
+import { DELIVERY_FIELDS, deliveryContext, deliveryHistory, recordCheck } from "./delivery.js";
 import { ingest, channels } from "./ingest.js";
 import { execMeta } from "./hooks.js";
 import {
@@ -55,12 +56,14 @@ export function apiRoutes(app, auth) {
   app.put("/api/docs/:coll/:id", auth, (req, res) => {
     const { coll, id } = req.params; if (!validColl(coll) || !validId(id)) return bad(res, "bad path");
     if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) return bad(res, "body must be an object");
+    if (coll === "tasks" && (deliveryHistory(getTask(id) || {}).length || DELIVERY_FIELDS.some(k => k in req.body && !(k === "reworks" && Array.isArray(req.body[k]) && !req.body[k].length && !getTask(id))))) return bad(res, "成果、检查和评审请使用专用接口，其他任务字段可用 PATCH 修改", 409);
     if (coll === "tasks" && (getTask(id)?.status === "已暂停" || req.body.status === "已暂停" || "pauseState" in req.body || "workClock" in req.body)) return bad(res, "暂停任务请用专用暂停/恢复接口；计时与断点由 Hub 维护", 409);
     res.json(setDoc(coll, id, req.body, who(req)));
   });
   app.patch("/api/docs/:coll/:id", auth, (req, res) => {
     const { coll, id } = req.params; if (!validColl(coll) || !validId(id)) return bad(res, "bad path");
     if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) return bad(res, "body must be an object");
+    if (coll === "tasks" && (DELIVERY_FIELDS.some(k => k in req.body) || (req.body.status === "已合并" && deliveryHistory(getTask(id) || {}).length))) return bad(res, "不能用文档修改覆盖成果历史或代替版本验收", 409);
     if (coll === "tasks" && ("pauseState" in (req.body || {}) || "workClock" in (req.body || {}) || ("status" in (req.body || {}) && (getTask(id)?.status === "已暂停" || req.body.status === "已暂停")))) return bad(res, "暂停或恢复请使用专用接口，保留断点与执行确认", 409);
     const d = updateDoc(coll, id, req.body || {}, who(req)); d ? res.json(d) : res.status(404).json({ error: "not_found" });
   });
@@ -89,6 +92,9 @@ export function apiRoutes(app, auth) {
 
   /* ---------- 任务（task.sh、脚本、网页共用） ---------- */
   app.get("/api/tasks/:id/lifecycle", auth, handle(req => lifecycleView(req.params.id)));
+  app.get("/api/tasks/:id/delivery", auth, handle(req => deliveryContext(taskOr404(req.params.id))));
+  app.get("/api/tasks/:id/delivery/:revision", auth, handle(req => deliveryContext(taskOr404(req.params.id), req.params.revision)));
+  app.post("/api/tasks/:id/delivery/:revision/select", auth, handle(req => selectDelivery(req.params.id, req.params.revision, req.body, who(req))));
   app.post("/api/tasks/:id/pause", auth, handle(req => pauseTask(req.params.id, req.body, who(req))));
   app.post("/api/tasks/:id/resume", auth, handle(req => resumeTask(req.params.id, req.body, who(req))));
   app.get("/api/focus", auth, handle((req) => focus.list({ limit: req.query.limit })));
@@ -140,18 +146,21 @@ export function apiRoutes(app, auth) {
   app.post("/api/tasks/:id/check", auth, (req, res) => {
     const t = getTask(req.params.id); if (!t) return res.status(404).json({ error: "not_found" });
     const b = req.body || {};
-    const check = { at: new Date().toISOString(), ok: !!b.ok, verify: Array.isArray(b.verify) ? b.verify.slice(0, 50) : [], outOfScope: Array.isArray(b.outOfScope) ? b.outOfScope.slice(0, 200) : [], changed: Array.isArray(b.changed) ? b.changed.slice(0, 500) : [], by: b.by || "task.sh", added: Number(b.added) || 0, removed: Number(b.removed) || 0 };
-    const patch = { lastCheck: check };
+    const { check, patch } = recordCheck(t, b, who(req));
     if (check.added || check.removed) patch.lines = check.added + check.removed;
     patchTask(t.id, patch, "task-sh");
     const fails = check.verify.filter((v) => v.result === "fail").length;
     ingest({ agent: String(b.agent || "task-sh"), kind: "check", event: "check", query: Object.assign({ task: t.id, branch: b.branch, repo: b.repo }, execMeta(req)), summary: (check.ok ? "检查通过" : "检查未通过") + (fails ? ` · 验证失败 ${fails} 项` : "") + (check.outOfScope.length ? ` · 越界 ${check.outOfScope.length} 个文件` : "") });
     res.json({ ok: true });
   });
-  // task.sh merge 成功后：还没评审就合并的，按“一次通过/经过退回”自动记一条评审
+  // task.sh merge 成功后核对已验收的来源提交；无成果历史的任务保留旧流程。
   app.post("/api/tasks/:id/merged", auth, (req, res) => {
     const t = getTask(req.params.id); if (!t) return res.status(404).json({ error: "not_found" });
     const b = req.body || {};
+    if (deliveryHistory(t).length) {
+      const v = deliveryContext(t);
+      if (!v.accepted || b.sourceCommit !== v.selected?.version) return bad(res, "请先验收当前成果版本，并确认合并来源提交与验收版本一致；未改写 Hub 验收状态", 409);
+    }
     if (t.status !== "已合并") reviewTask(t, "merge", { note: "由 task.sh merge 记录" }, "task-sh");
     patchTask(t.id, { mergeCommit: String(b.commit || ""), mergedTo: String(b.base || "") }, "task-sh");
     ingest({ agent: "task-sh", kind: "merge", event: "merge", query: { task: t.id, branch: b.branch, repo: b.repo }, summary: "已合并到 " + (b.base || "主分支") + (b.commit ? " · " + String(b.commit).slice(0, 8) : "") });
@@ -161,7 +170,7 @@ export function apiRoutes(app, auth) {
     const t = getTask(req.params.id); if (!t) return res.status(404).json({ error: "not_found" });
     const b = req.body || {};
     if (!["merge", "rework", "drop"].includes(b.action)) return bad(res, "action must be merge|rework|drop");
-    reviewTask(t, b.action, { reasons: b.reasons, note: b.note, dropReason: b.dropReason }, who(req));
+    reviewTask(t, b.action, b, who(req));
     res.json({ task: getTask(t.id) });
   });
   app.post("/api/tasks/:id/transition", auth, (req, res) => {
@@ -176,9 +185,10 @@ export function apiRoutes(app, auth) {
     // 原文优先按代码块提取（带指纹，钩子和执行端重复送达同一回执时只写一次）
     const r = typeof b.text === "string" ? findReceipt(b.text) || parseReceipt(b.text) : normReceipt(b);
     if (!r) return bad(res, "没有识别到回执");
+    if (r.task && r.task !== t.id) return bad(res, "回执中的任务编号与目标任务不一致");
     const out = applyReceipt(t, r, who(req), execMeta(req).run);
     ingest({ agent: who(req), kind: "receipt", event: "receipt", query: { task: t.id }, summary: "回执：" + (r.summary || "").slice(0, 120) + " → " + out.task.status });
-    res.json({ task: out.task });
+    res.json({ task: out.task, deliveryId: out.deliveryId, archived: out.archived || false, skipped: out.skipped });
   });
   app.get("/api/tasks/:id/activity", auth, (req, res) => {
     const id = req.params.id;

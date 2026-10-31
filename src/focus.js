@@ -1,6 +1,7 @@
 // Task-level work context. The same service powers REST, MCP and the daily view.
 import crypto from "node:crypto";
 import { z } from "zod";
+import { currentDelivery, deliveryContext } from "./delivery.js";
 
 const short = (max) => z.string().trim().max(max);
 const link = z.string().trim().max(2000).refine((s) => {
@@ -37,7 +38,8 @@ function contentOf(t) {
 
 // No dates, heartbeats, usage counters or run percentages: these do not change a decision.
 export function focusSnapshot(task, getTask) {
-  const b = contentOf(task), receipt = task.receipt || {}, check = task.lastCheck || {};
+  const b = contentOf(task), receipt = task.receipt || {}, revision = currentDelivery(task), delivery = revision && !revision.legacy ? deliveryContext(task) : null;
+  const check = delivery ? delivery.check || {} : task.lastCheck || {};
   const risks = [...new Set([meaningful(b.risk), meaningful(receipt.risks), meaningful(receipt.scope)].filter(Boolean))];
   return {
     title: plain(task.title), project: plain(task.project), status: plain(task.status),
@@ -53,7 +55,8 @@ export function focusSnapshot(task, getTask) {
     evidence: b.evidence,
     requirements: { goal: plain(task.goal), allow: plain(task.allow), deny: plain(task.deny), specFingerprint: hash(plain(task.spec)),
       acceptance: arr(task.acceptance).map((a) => ({ text: plain(a?.text), done: a?.done === true })) },
-    delivery: { summary: plain(receipt.summary), changed: arr(receipt.changed).map(String), version: plain(task.mergeCommit), pr: plain(task.pr),
+    delivery: { summary: plain(receipt.summary), changed: arr(receipt.changed).map(String), version: plain(receipt.version || task.mergeCommit), pr: plain(task.pr),
+      ...(delivery ? { revisionId: revision.id, accepted: delivery.accepted, blockers: delivery.blockers, archivedCount: delivery.archivedCount } : {}),
       verify: arr(receipt.verify).map((v) => ({ cmd: plain(v?.cmd), result: plain(v?.result) || "unknown" })) },
     checks: { ok: typeof check.ok === "boolean" ? check.ok : null, outOfScope: arr(check.outOfScope).map(String),
       verify: arr(check.verify).map((v) => ({ cmd: plain(v?.cmd), result: plain(v?.result) || "unknown" })) },

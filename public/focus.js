@@ -36,7 +36,7 @@
       if (typeof value === "string") return value || "已清除";
       if (field === "relations") return value.map((r) => `${r.label} ${r.title}（${r.taskId} · ${r.status}）：${r.note}`).join("\n") || "无关联";
       if (field === "evidence") return value.map((e) => `${e.label} ${e.url}${e.version ? " @ " + e.version : ""}`).join("\n") || "无链接";
-      if (field === "delivery") return [value.summary, value.version && "提交：" + value.version, value.pr, ...(value.changed || []), ...(value.verify || []).map((v) => `${v.cmd}：${v.result}`)].filter(Boolean).join("\n") || "尚无回执";
+      if (field === "delivery") return [value.summary, value.version && "成果版本：" + value.version, value.revisionId && (value.accepted ? "本版已验收" : "本版待核对"), value.archivedCount ? "另有 " + value.archivedCount + " 版归档成果" : "", ...(value.blockers || []), value.pr, ...(value.changed || []), ...(value.verify || []).map((v) => `${v.cmd}：${v.result}`)].filter(Boolean).join("\n") || "尚无回执";
       if (field === "checks") return [value.ok == null ? "尚未检查" : value.ok ? "上报检查通过" : "上报检查未通过", ...(value.verify || []).map((v) => `${v.cmd}：${v.result}`), ...(value.outOfScope || []).map((s) => "越界：" + s)].join("\n");
       if (field === "checkpoint") return ["暂停原因：" + value.reason, "当时结论：" + value.summary, "恢复第一步：" + value.nextAction, value.interruption ? "插单：" + value.interruption.title + " · " + value.interruption.status : "无插单"].join("\n");
       if (field === "requirements") return [value.goal, "允许：" + (value.allow || "未限定"), "禁止：" + (value.deny || "无额外限制"), ...(value.acceptance || []).map((a) => (a.done ? "已勾选：" : "待验证：") + a.text), "规格版本：" + value.specFingerprint.slice(0, 10)].join("\n");
