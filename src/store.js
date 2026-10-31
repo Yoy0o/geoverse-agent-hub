@@ -1,5 +1,6 @@
 // Shared synchronous storage operations for Node SQLite and Durable Objects SQLite.
 import { EventEmitter } from "node:events";
+import { nextClock } from "./task-time.js";
 
 export function createStore(db) {
   const bus = new EventEmitter();
@@ -95,9 +96,10 @@ export function createStore(db) {
     }
     return out;
   }
-  function setDoc(coll, id, data, origin = "api") {
+  function setDoc(coll, id, data, origin = "api", { restore = false } = {}) {
     const body = stripDeletes(Object.assign({}, data));
     delete body.id;
+    if (coll === "tasks" && !restore) body.workClock = nextClock(getDoc(coll, id)?.data, body.status, now());
     stUpsert.run(coll, id, JSON.stringify(body), now(), nextSeq(), "");
     stTombDel.run(coll, id);
     const d = getDoc(coll, id);

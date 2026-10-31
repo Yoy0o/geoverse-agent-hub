@@ -130,7 +130,7 @@ export function ingest(o) {
   let context = "";
   let t = task;
   if (t && kind === "session.start") {
-    if (["待规格", "待执行", "需介入"].includes(t.status)) {
+    if (["待规格", "待执行", "需介入"].includes(t.status) && !(t.status === "待执行" && t.pauseState?.resumedAt)) {
       const d = moveTask(t, "执行中", { agent: t.agent || display, branch: t.branch || q.branch || "", session: t.session || x.session }, agent);
       t = Object.assign({}, d.data, { id: t.id });
     } else if (!t.agent || (!t.branch && q.branch)) {
@@ -163,7 +163,7 @@ export function ingest(o) {
   if (receipt) {
     const target = (receipt.task && getTask(receipt.task)) || t;
     if (target) {
-      receiptResult = applyReceipt(target, receipt, agent);
+      receiptResult = applyReceipt(target, receipt, agent, q.run);
       t = receiptResult.task;
       if (!receiptResult.skipped) addEvent({ agent, kind: "receipt", raw: o.event || kind, task: target.id, session: x.session, repo, branch: q.branch, summary: "回执：" + (receipt.status === "blocked" ? "阻塞 · " : "") + (receipt.summary || "").slice(0, 120) + " → " + receiptResult.to });
     }

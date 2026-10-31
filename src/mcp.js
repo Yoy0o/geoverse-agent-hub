@@ -6,12 +6,14 @@ import { getDoc, listDocs, setDoc, updateDoc, transaction, addEvent, sessionsFor
 import { createFocusService, briefShape, fingerprintSchema } from "./focus.js";
 import {
   STATUSES, OPEN, RISKS, REASONS, TARGETS, agentName, getTask, allTasks, allRules, getConfig, projByName, newTaskId, newTaskDoc,
-  moveTask, patchTask, reviewTask, applyReceipt, normReceipt, taskBrief, relevantRules, attention, metrics,
+  moveTask, patchTask, reviewTask, selectDelivery, applyReceipt, normReceipt, taskBrief, relevantRules, attention, metrics,
 } from "./domain.js";
 import { markChannel } from "./ingest.js";
 import { config } from "#hub/config";
 import { startRun, touchFromEvent, reportProgress, dispatch, cancelRun, runsView, runnersView, RUN_ACTIVE, RUN_LABEL, MODE_LABEL } from "./exec.js";
 import { retiredTo, retiredHint } from "./retire.js";
+import { lifecycleView, pauseTask, resumeTask, pauseShape, resumeShape } from "./lifecycle.js";
+import { deliveryContext } from "./delivery.js";
 
 const text = (s) => ({ content: [{ type: "text", text: String(s) }] });
 const json = (o) => text(JSON.stringify(o, null, 2));
@@ -53,7 +55,7 @@ function build(agent) {
     title: "读取可续接上下文", description: "读取当前结论、相对上次已读的变化、关联工作、依据和完整任务单。返回 expectedFingerprint；更新前需以最新指纹为依据。",
     inputSchema: { id: z.string() }, annotations: { readOnlyHint: true },
   }, async ({ id }) => {
-    try { const v = focus.context(id); log("get_work_context", id); return json({ context: v.brief, expectedFingerprint: v.fingerprint, content: v.content, changes: v.changes, taskBrief: taskBrief(getTask(id)) }); }
+    try { const v = focus.context(id); log("get_work_context", id); return json({ context: v.brief, expectedFingerprint: v.fingerprint, content: v.content, changes: v.changes, lifecycle: lifecycleView(id), delivery: (() => { const d = deliveryContext(getTask(id)); return { currentId: d.currentId, version: d.selected?.version || "", accepted: d.accepted, versionCount: d.versions.length, archivedCount: d.archivedCount, blockers: d.selected ? d.blockers : [], warnings: d.selected ? d.warnings : [], readTool: "get_delivery" }; })(), taskBrief: taskBrief(getTask(id)) }); }
     catch (e) { if (e.expose) return err(e.message); throw e; }
   });
   server.registerTool("update_work_brief", {
@@ -73,6 +75,19 @@ function build(agent) {
     log("today");
     const running = runsView({ statuses: RUN_ACTIVE, limit: 50 }).map((r) => ({ run: r.id, task: r.task, status: RUN_LABEL[r.health] || r.status, where: (r.location === "cloud" ? "云端" : "本机") + (r.runnerName || r.host ? " · " + (r.runnerName || r.host) : ""), agent: r.agent, progress: r.progress, step: r.step, heartbeatAt: r.heartbeatAt }));
     return json({ attention: attention(ts), running, pendingRules: allRules().filter((r) => r.status === "待写入").length, open: ts.filter((t) => OPEN.includes(t.status)).length, last7d: m });
+  });
+
+  server.registerTool("pause_task", {
+    title: "保存断点并暂停", description: "主动暂停任务，保存原因、当前结论、恢复第一步，可关联已有插单编号。返回 Agent 停止状态；不能把暂停状态当作进程已经停止。先 get_work_context 读取最新指纹。",
+    inputSchema: { id: z.string(), ...pauseShape },
+  }, async ({ id, ...input }) => {
+    try { const v = pauseTask(id, input, agent); log("pause_task", id); return json(v); } catch (e) { if (e.expose) return err(e.message); throw e; }
+  });
+  server.registerTool("resume_task", {
+    title: "恢复任务到待执行", description: "恢复暂停的任务，返回断点；不会启动 Agent。执行端尚未确认停止时拒绝恢复。只有确实在原会话/机器停止外部 Agent 后才传 confirmedExternalStop=true。恢复后读取上下文，再 start_task 或派发。",
+    inputSchema: { id: z.string(), ...resumeShape },
+  }, async ({ id, ...input }) => {
+    try { const v = resumeTask(id, input, agent); log("resume_task", id); return json(v); } catch (e) { if (e.expose) return err(e.message); throw e; }
   });
 
   server.registerTool("list_tasks", {
@@ -149,6 +164,7 @@ function build(agent) {
   }, async (a) => {
     const t = getTask(a.id); if (!t) return err("找不到任务 " + a.id);
     const extra = { agent: t.agent || agentName(agent), branch: t.branch || a.branch || "", session: t.session || a.session || "" };
+    if (t.status === "已暂停") return err("任务已暂停，请先 resume_task 并读取断点");
     if (["待规格", "待执行", "需介入"].includes(t.status)) moveTask(t, "执行中", extra, agent); else patchTask(t.id, extra, agent);
     const run = startRun(getTask(a.id), { location: a.location || (agent === "claude-ai" ? "cloud" : "local"), host: a.host, agent, branch: a.branch, session: a.session }, agent);
     log("start_task", a.id, "开始执行（" + (run.location === "cloud" ? "云端" : "本机") + "）");
@@ -200,6 +216,19 @@ function build(agent) {
     try { const r = cancelRun(a.run, agent); markChannel(agent, "mcp"); return text("已处理：" + runLine(r)); } catch (e) { return err(e.message); }
   });
 
+  server.registerTool("get_delivery", {
+    title: "读取成果版本与验收依据", description: "默认读取当前成果、相对上一版的变化、绑定的检查和验收状态；传 revision 可查看历史版本。评审前读取这里的 currentId 和 expectedFingerprint，不能复用阶段摘要指纹。",
+    inputSchema: { id: z.string(), revision: z.string().optional() }, annotations: { readOnlyHint: true },
+  }, async ({ id, revision }) => {
+    const t = getTask(id); if (!t) return err("找不到任务 " + id);
+    try { return json(deliveryContext(t, revision)); } catch (e) { if (e.expose) return err(e.message); throw e; }
+  });
+  server.registerTool("select_delivery", {
+    title: "选择既有成果重新评审", description: "只有用户明确选择复用某版成果时调用；先 get_delivery 核对版本和当前指纹。任务须为待执行或待评审，选择后仍需重新验收，不能把归档回执自动当成当前成果。",
+    inputSchema: { id: z.string(), revision: z.string(), expectedFingerprint: fingerprintSchema },
+  }, async ({ id, revision, expectedFingerprint }) => {
+    try { return json(selectDelivery(id, revision, { expectedFingerprint }, agent)); } catch(e) { if(e.expose) return err(e.message); throw e; }
+  });
   server.registerTool("submit_receipt", {
     title: "提交交付回执", description: "任务结束时提交回执。status=blocked 或有验证失败时任务进入“需介入”，否则进入“待评审”。",
     inputSchema: {
@@ -207,13 +236,14 @@ function build(agent) {
       changed: z.array(z.string()).optional(), verify: z.array(z.object({ cmd: z.string(), result: z.enum(["pass", "fail", "unknown"]) })).optional(),
       scope: z.string().optional().describe("ok，或超出范围的改动及原因"), risks: z.string().optional(), session: z.string().optional(),
       minutes: z.number().optional(), ci_rounds: z.number().optional(),
+      version: z.string().max(100).optional().describe("实际 Git 提交号或文档/实验版本；验收前必须补齐"), run: z.string().optional().describe("当前执行编号，未知时留空"),
     },
   }, async (a) => {
     const t = getTask(a.task); if (!t) return err("找不到任务 " + a.task);
     const r = normReceipt(a);
     const res = applyReceipt(t, r, agent);
     log("submit_receipt", t.id, "回执：" + (a.summary || "").slice(0, 100) + " → " + (res.to || res.task.status));
-    return text(`回执已写入 ${t.id}，当前状态：${res.task.status}`);
+    return text(`回执${res.archived ? "已归档，未覆盖当前成果" : "已写入"} ${t.id}，成果编号：${res.deliveryId || ""}，当前状态：${res.task.status}`);
   });
 
   server.registerTool("move_task", {
@@ -222,12 +252,16 @@ function build(agent) {
       id: z.string(), action: z.enum(["merge", "rework", "drop", "set"]),
       to: z.enum(STATUSES).optional().describe("action=set 时的目标状态"),
       reasons: z.array(z.enum(REASONS)).optional(), note: z.string().optional(), drop_reason: z.string().optional(),
+      expectedDeliveryId: z.string().optional(), expectedFingerprint: fingerprintSchema.optional(),
+      verificationConfirmed: z.boolean().optional().describe("只有人工核对该版本与验证依据后才传 true"), acceptedCriteria: z.array(z.number().int().min(0)).optional().describe("人工验收通过的条目序号，从 0 开始；进度勾选不能代替验收"),
     },
   }, async (a) => {
     const t = getTask(a.id); if (!t) return err("找不到任务 " + a.id);
     if (a.action === "rework" && !(a.reasons || []).length) return err("退回需要至少一个原因：" + REASONS.join("、"));
-    if (a.action === "set") { if (!a.to) return err("缺少 to"); moveTask(t, a.to, null, agent); }
-    else reviewTask(t, a.action, { reasons: a.reasons, note: a.note, dropReason: a.drop_reason }, agent);
+    try {
+      if (a.action === "set") { if (!a.to) return err("缺少 to"); moveTask(t, a.to, null, agent); }
+      else reviewTask(t, a.action, { ...a, dropReason: a.drop_reason }, agent);
+    } catch (e) { if (e.expose) return err(e.message); throw e; }
     const nt = getTask(a.id);
     log("move_task", a.id, `${t.status} → ${nt.status}`);
     return text(`${a.id}：${t.status} → ${nt.status}`);

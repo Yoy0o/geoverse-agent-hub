@@ -6,6 +6,11 @@
 #   bash scripts/agent/task.sh run <任务编号> <claude|codex|gemini|cursor|kiro|code>   在该任务的 worktree 里启动 Agent
 #   bash scripts/agent/task.sh progress <任务编号> <0-100|-> <步骤>   汇报进度
 #   bash scripts/agent/task.sh status <任务编号>          任务状态与执行情况（在哪里执行、做到哪一步）
+#   bash scripts/agent/task.sh delivery <编号>         读取当前成果版本、差异和验收依据
+#   bash scripts/agent/task.sh review <编号> <JSON文件>   对刚读取的成果版本验收或退回
+#   bash scripts/agent/task.sh context <任务编号>         读取断点、停止情况与最新指纹
+#   bash scripts/agent/task.sh pause <任务编号> <JSON文件> 保存原因、结论、恢复第一步和插单关系
+#   bash scripts/agent/task.sh resume <任务编号> <JSON文件> 恢复到待执行，不自动启动 Agent
 #   bash scripts/agent/task.sh list                      列出进行中的任务 worktree
 #   bash scripts/agent/task.sh path <任务编号>            输出该任务的 worktree 路径
 #   bash scripts/agent/task.sh brief <任务编号>           从 hub 重新拉取任务单到 specs/<编号>.md
@@ -45,7 +50,21 @@ write_brief(){ # $1=目录
   rm -f "$1/specs/$id.md.tmp"; return 1
 }
 
+if [[ "$cmd" =~ ^(start|attach|run)$ ]] && hub_on; then
+  need_id
+  hub_api GET "/api/tasks/$id" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{if(JSON.parse(s).status==="已暂停"){console.error("任务已暂停，请先恢复并读取断点");process.exit(1)}})'
+fi
 case "$cmd" in
+  delivery)
+    need_id; hub_api GET "/api/tasks/$id/delivery" ;;
+  review)
+    need_id; file=${3:-}; [ -f "$file" ] || { echo "用法：task.sh review <编号> <JSON文件>" >&2; exit 1; }
+    hub_api POST "/api/tasks/$id/review" "$(cat "$file")" ;;
+  context)
+    need_id; hub_api GET "/api/tasks/$id/lifecycle" ;;
+  pause|resume)
+    need_id; file=${3:-}; [ -f "$file" ] || { echo "用法：task.sh $cmd <编号> <JSON文件>" >&2; exit 1; }
+    hub_api POST "/api/tasks/$id/$cmd" "$(cat "$file")" ;;
   new)
     shift; title=${1:-}; [ -n "$title" ] || { echo "用法：task.sh new \"<标题>\" [--risk L2] [--allow 'src/**'] [--budget 60] [--status 待执行]" >&2; exit 1; }; shift
     risk=L2; allow=""; budget=60; status="待执行"
@@ -112,6 +131,7 @@ case "$cmd" in
     ;;
   run)
     need_id; ag=${3:-claude}; d=$(dir_of); [ -n "$d" ] || { echo "找不到任务 $id 的 worktree，先运行 task.sh start" >&2; exit 1; }
+    if hub_on; then hub_start "$d" "$(branch_of)" false || { echo "开工登记失败，请检查 Hub 状态" >&2; exit 1; }; fi
     [ -f "$d/specs/$id.md" ] || write_brief "$d" || true
     prompt="执行任务 $id：先阅读 specs/$id.md（任务单），按验收标准和允许修改的范围实现；有阶段成果时按任务单约定用 get_work_context / update_work_brief 或 hub.sh context / brief 更新短摘要，钩子也支持 agent-work-brief JSON 代码块；结束前运行 bash scripts/agent/verify.sh，最后按 AGENTS.md 输出交付回执。"
     cd "$d"
@@ -144,6 +164,8 @@ case "$cmd" in
       esac
     fi
     cd "$d"
+    checked_version=$(git rev-parse HEAD); checked_dirty=false
+    [ -z "$(git status --porcelain | grep -vE ' (specs|\.agent)/' || true)" ] || checked_dirty=true
     echo "== 统一验证 =="; vr=0
     mkdir -p .agent; bash scripts/agent/verify.sh 2>&1 | tee .agent/check.log || vr=1
     changed=$( { git diff --name-only "$BASE"...HEAD; git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -vE '^(specs|\.agent)/' || true)
@@ -169,7 +191,10 @@ case "$cmd" in
       ch=(); oos=()
       while IFS= read -r l; do [ -n "$l" ] && ch+=("$l"); done <<< "$changed"
       while IFS= read -r l; do [ -n "$l" ] && oos+=("$l"); done <<< "$out"
-      hub_api POST "/api/tasks/$id/check" "{\"ok\":$([ $result = 0 ] && echo true || echo false),\"verify\":[${items}],\"changed\":$(jarr ${ch[@]+"${ch[@]}"}),\"outOfScope\":$(jarr ${oos[@]+"${oos[@]}"}),\"added\":${add:-0},\"removed\":${del:-0},\"by\":\"task.sh\",\"branch\":$(hub_jstr "$(hub_branch)"),\"repo\":$(hub_jstr "$NAME")}" >/dev/null 2>&1 && echo && echo "（检查结果已回传 agent-hub）" || true
+      version=$(git rev-parse HEAD); dirty=$checked_dirty
+      [ "$checked_version" = "$version" ] || dirty=true
+      [ -z "$(git status --porcelain | grep -vE ' (specs|\.agent)/' || true)" ] || dirty=true
+      hub_api POST "/api/tasks/$id/check" "{\"version\":$(hub_jstr "$version"),\"dirty\":$dirty,\"ok\":$([ $result = 0 ] && echo true || echo false),\"verify\":[${items}],\"changed\":$(jarr ${ch[@]+"${ch[@]}"}),\"outOfScope\":$(jarr ${oos[@]+"${oos[@]}"}),\"added\":${add:-0},\"removed\":${del:-0},\"by\":\"task.sh\",\"branch\":$(hub_jstr "$(hub_branch)"),\"repo\":$(hub_jstr "$NAME")}" >/dev/null 2>&1 && echo && echo "（检查结果已回传 agent-hub）" || true
     fi
     echo
     if [ $result -eq 0 ]; then echo "结果：通过"; exit 0; fi
@@ -178,17 +203,21 @@ case "$cmd" in
   merge)
     need_id; b=$(branch_of); d=$(dir_of); [ -n "$b" ] || { echo "找不到任务 $id 的分支" >&2; exit 1; }
     if [ -n "$d" ] && [ -n "$(git -C "$d" status --porcelain | grep -vE ' (specs|\.agent)/' || true)" ]; then echo "worktree 里还有未提交的改动，请先提交或处理" >&2; exit 1; fi
+    source_sha=$(git -C "$MAIN" rev-parse "$b")
+    if hub_on; then
+      hub_api GET "/api/tasks/$id/delivery" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);if(v.versions.length&&(!v.accepted||v.selected.version!==process.argv[1])){console.error("请先验收当前分支的实际提交版本；本次未执行 Git 合并");process.exit(1)}})' "$source_sha" || exit 1
+    fi
     cur=$(git -C "$MAIN" symbolic-ref --short HEAD)
     [ "$cur" = "$BASE" ] || { echo "主工作区当前在 $cur，请先切回 $BASE" >&2; exit 1; }
-    if ! git -C "$MAIN" merge --no-ff "$b" -m "Merge $b" -m "Task: $id"; then
+    if ! git -C "$MAIN" merge --no-ff "$source_sha" -m "Merge $b" -m "Task: $id"; then
       git -C "$MAIN" merge --abort 2>/dev/null || true
       echo "合并未完成（验证失败或有冲突），主分支已恢复原状" >&2; exit 1
     fi
     sha=$(git -C "$MAIN" rev-parse HEAD)
-    if hub_on && hub_api POST "/api/tasks/$id/merged" "{\"commit\":\"$sha\",\"base\":$(hub_jstr "$BASE"),\"branch\":$(hub_jstr "$b"),\"repo\":$(hub_jstr "$NAME")}" >/dev/null 2>&1; then
+    if hub_on && hub_api POST "/api/tasks/$id/merged" "{\"sourceCommit\":\"$source_sha\",\"commit\":\"$sha\",\"base\":$(hub_jstr "$BASE"),\"branch\":$(hub_jstr "$b"),\"repo\":$(hub_jstr "$NAME")}" >/dev/null 2>&1; then
       echo "已合并到 $BASE，agent-hub 已标记“已合并”。清理：bash scripts/agent/task.sh clean $id"
     else
-      echo "已合并到 $BASE。请在工作台把任务标记为“已合并”，然后运行：bash scripts/agent/task.sh clean $id"
+      echo "已合并到 $BASE。Hub 未确认本次合并，请核对成果版本和评审状态，然后运行：bash scripts/agent/task.sh clean $id"
     fi
     ;;
   clean)

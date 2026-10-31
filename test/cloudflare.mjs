@@ -53,7 +53,7 @@ async function runOAuth() {
 try {
   await fs.mkdir(persist, { recursive: true });
   await start(false);
-  for (const p of ["/", "/shim.js", "/focus.js", "/focus.css", "/task-edits.js", "/api/health", "/api/focus", "/api/export", "/mcp"]) {
+  for (const p of ["/", "/shim.js", "/focus.js", "/focus.css", "/task-edits.js", "/delivery.js", "/api/health", "/api/focus", "/api/export", "/mcp"]) {
     check((await call(p)).status === 401, `production Access gate protects ${p}`);
   }
   check((await call("/", { headers: { "Cf-Access-Authenticated-User-Email": "hio250@163.com", Authorization: "Bearer " + token } })).status === 401, "identity header plus Hub token cannot bypass Access");
@@ -64,7 +64,7 @@ try {
   const releaseCaps = await json(await api("/api/capabilities"));
   check(releaseHealth.version === version && releaseCaps.version === version, "Node and Worker use the package release version");
   check(/^[a-f0-9]{40}$/.test(releaseHealth.build.commit) && releaseHealth.build.commit === releaseCaps.build.commit, "health and capabilities identify the same build commit");
-  for (const file of ["index.html", "shim.js", "focus.js", "focus.css", "task-edits.js"]) {
+  for (const file of ["index.html", "shim.js", "focus.js", "focus.css", "task-edits.js", "delivery.js"]) {
     const expected = createHash("sha256").update(await fs.readFile("public/" + file)).digest("hex");
     const deployed = await (await call(file === "index.html" ? "/" : "/" + file)).arrayBuffer();
     check(releaseHealth.build.assets[file] === expected && createHash("sha256").update(Buffer.from(deployed)).digest("hex") === expected, "build manifest matches served " + file);
@@ -108,7 +108,7 @@ try {
   const client = new Client({ name: "cloudflare-test", version: "1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(base + "/mcp"), { requestInit: { headers: { Authorization: "Bearer " + token } } }));
   const toolNames = (await client.listTools()).tools.map(t => t.name).sort();
-  const expectedTools = ["today", "list_tasks", "get_task", "create_task", "update_task", "start_task", "report_progress", "dispatch_task", "list_runs", "cancel_run", "submit_receipt", "move_task", "list_rules", "add_rule", "get_project", "log_note", "task_usage", "get_focus", "get_work_context", "update_work_brief"].sort();
+  const expectedTools = ["today", "list_tasks", "get_task", "create_task", "update_task", "start_task", "report_progress", "dispatch_task", "list_runs", "cancel_run", "submit_receipt", "move_task", "list_rules", "add_rule", "get_project", "log_note", "task_usage", "get_focus", "get_work_context", "update_work_brief", "pause_task", "resume_task", "get_delivery", "select_delivery"].sort();
   check(toolNames.length === expectedTools.length && expectedTools.every((name, i) => toolNames[i] === name), "MCP SDK initializes with the complete tool inventory in workerd");
   check((await client.callTool({ name: "get_task", arguments: { id } })).content[0].text.includes(id), "MCP reads shared SQLite task state");
   const context = JSON.parse((await client.callTool({ name: "get_work_context", arguments: { id } })).content[0].text);
@@ -136,6 +136,22 @@ try {
   check(claimed.run && claimed.run.id === dispatched.run.id && claimed.run.location === "cloud", "runner claims the queued run atomically");
   await json(await api(`/api/runs/${claimed.run.id}/update`, "POST", { status: "running", step: "codex 运行中" }));
   check((await json(await api("/api/exec"))).active.some(r => r.id === claimed.run.id && r.health === "running"), "execution overview reports live runs and runner health");
+  const beforePause = await json(await api(`/api/tasks/${id}/lifecycle`));
+  const paused = await json(await api(`/api/tasks/${id}/pause`, "POST", { expectedFingerprint: beforePause.expectedFingerprint, reason: "Workerd checkpoint", summary: "Durable work context", nextAction: "Run the next experiment" }));
+  check(paused.status === "已暂停" && paused.execution.state === "stopping", "pause checkpoints persist and wait for runner acknowledgement in workerd");
+  check((await api(`/api/tasks/${id}/resume`, "POST", { expectedFingerprint: paused.expectedFingerprint })).status === 409, "resume cannot bypass pending execution stop");
+  await json(await api(`/api/runs/${claimed.run.id}/update`, "POST", { status: "cancelled", exitCode: 143 }));
+  const resumed = await json(await api(`/api/tasks/${id}/resume`, "POST", { expectedFingerprint: paused.expectedFingerprint }));
+  check(resumed.status === "待执行" && resumed.activeMs === paused.activeMs, "resume preserves active time and does not start a process in workerd");
+  const deliveryTask = (await json(await api('/api/tasks', 'POST', {title:'Versioned workerd delivery',acceptance:['route test']}))).id;
+  const delivered = await json(await api(`/api/tasks/${deliveryTask}/receipt`, 'POST', {version:'workerd-v1',summary:'Verified route',status:'done',verify:[{cmd:'route test',result:'pass'}],scope:'ok',risks:'无'}));
+  const beforeDeliveryCheck = await json(await api(`/api/tasks/${deliveryTask}/delivery`));
+  check(beforeDeliveryCheck.currentId === delivered.deliveryId && beforeDeliveryCheck.versions.length === 1, 'delivery version is recorded in Durable Object SQLite');
+  await json(await api(`/api/tasks/${deliveryTask}/check`, 'POST', {deliveryId:delivered.deliveryId,version:'workerd-v1',ok:true,verify:[{cmd:'route test',result:'pass'}]}));
+  check((await api(`/api/tasks/${deliveryTask}/review`, 'POST', {action:'merge',expectedDeliveryId:delivered.deliveryId,expectedFingerprint:beforeDeliveryCheck.expectedFingerprint,verificationConfirmed:true,acceptedCriteria:[0]})).status === 409, 'new version-bound evidence invalidates stale review in workerd');
+  const readyDelivery = await json(await api(`/api/tasks/${deliveryTask}/delivery`));
+  await json(await api(`/api/tasks/${deliveryTask}/review`, 'POST', {action:'merge',expectedDeliveryId:readyDelivery.currentId,expectedFingerprint:readyDelivery.expectedFingerprint,verificationConfirmed:true,acceptedCriteria:[0]}));
+  check((await json(await api(`/api/tasks/${deliveryTask}/delivery`))).accepted, 'workerd acceptance binds the exact delivery and check');
   // 多端同步：对端接口在 workerd 中可用
   const info = await json(await api("/api/sync/info"));
   const changes = await json(await api(`/api/sync/changes?since=-1&peer=fixture-peer`));
@@ -161,6 +177,10 @@ try {
   check((await json(await api(`/api/tasks/${id}`))).goal === "broadcast fixture", "SQLite data survives runtime restart");
   const persistedWork = await json(await api(focusPath));
   check(persistedWork.content.summary === "Durable work context" && persistedWork.readAt && persistedWork.resolution?.action === "accept", "work brief, reading state and decision survive runtime restart");
+  const persistedLifecycle = await json(await api(`/api/tasks/${id}/lifecycle`));
+  check(persistedLifecycle.checkpoint.reason === "Workerd checkpoint" && persistedLifecycle.checkpoint.resumedAt && persistedLifecycle.activeMs === paused.activeMs, "checkpoint and stopped workflow clock survive backup and runtime restart");
+  const persistedDelivery = await json(await api(`/api/tasks/${deliveryTask}/delivery`));
+  check(persistedDelivery.accepted && persistedDelivery.currentId === delivered.deliveryId && persistedDelivery.reviews.length === 1 && persistedDelivery.check.version === 'workerd-v1', 'delivery, evidence and bound acceptance survive backup and runtime restart');
   check((await call("/api/tasks", { headers: { Cookie: cookie } })).status === 200, "stored browser session survives runtime restart");
   const logoutStream = await call("/api/stream", { headers: { Cookie: cookie } });
   const logoutReader = logoutStream.body.getReader();
