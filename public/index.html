@@ -283,6 +283,7 @@ details.more summary{cursor:pointer;font-size:14px;font-weight:500}
 <script src="/focus.js"></script>
 <script src="/task-edits.js"></script>
 <script src="/delivery.js"></script>
+<script src="/results.js"></script>
 <script>
 (function(){
 "use strict";
@@ -294,7 +295,7 @@ const RISK_TIP = {L1:"机械型：依赖升级、lint 修复、配置、迁移",
 const REASONS = ["规格不清","上下文缺失","越界改动","验证不足","设计问题","代码质量","安全隐患","Agent 能力不足"];
 const TARGETS = ["AGENTS.md","CLAUDE.md",".cursor/rules","评审清单","验证脚本","任务单模板"];
 const DEFAULT_AGENTS = ["Claude Code","Cowork","Codex","Cursor","Copilot","Kiro","Gemini CLI"];
-const TABS = [["today","今日"],["board","看板"],["exec","执行"],["projects","项目"],["agents","接入"],["capture","录入"],["rules","规则库"],["retro","复盘"],["export","同步与设置"]];
+const TABS = [["today","今日"],["board","看板"],["results","成果"],["exec","执行"],["projects","项目"],["agents","接入"],["capture","录入"],["rules","规则库"],["retro","复盘"],["export","同步与设置"]];
 const NEXT = {
   "待规格":[["待执行","规格就绪"]],
   "待执行":[["执行中","开始执行"]],
@@ -512,7 +513,7 @@ function restoreTaskEdits(root){
   $$("[data-f]", root).forEach(el => { const v = taskEdits.value(S.openId, el.dataset.f, el.value); el.value = v == null ? "" : String(v); });
 }
 function renderTabs(){
-  const need = S.tasks.filter(t=>t.status==="需介入"||t.status==="待评审").length;
+  const need = focusUI.counts()?.attention ?? S.tasks.filter(t=>t.status==="需介入"||t.status==="待评审").length;
   const pendingRules = S.rules.filter(r=>r.status==="待写入").length;
   $("#tabs").innerHTML = TABS.map(([k,l]) => {
     const c = k==="today" && need ? '<span class="cnt">'+need+'</span>' : k==="rules" && pendingRules ? '<span class="cnt">'+pendingRules+'</span>' : k==="exec" ? execCount() : "";
@@ -1165,7 +1166,7 @@ function closeDrawer(){
 }
 const A = {
   tab(el){ S.tab = el.dataset.k; S.openId = null; S.reviewMode = null; S.dispatch = null; try{ localStorage.setItem("awb.tab", S.tab); }catch(e){} if (S.tab==="agents") refreshStatus(); if (S.tab==="exec") loadExec(); if (S.tab==="export") loadSync(); render(); window.scrollTo(0,0); },
-  open(el){ const was = S.openId; S.openId = el.dataset.id; S.reviewMode = null; S.reviewSel = []; S.dispatch = null; loadActivity(S.openId); loadTaskRuns(S.openId); focusUI.invalidate(); render(); if (!was) focusDrawer(); },
+  open(el){ const was = S.openId; S.openId = el.dataset.id; if(el.dataset.revision) S.deliverySelection.set(S.openId,el.dataset.revision); S.reviewMode = null; S.reviewSel = []; S.dispatch = null; loadActivity(S.openId); loadTaskRuns(S.openId); focusUI.invalidate(); render(); if (!was) focusDrawer(); },
   "new-task"(){ S.tab = "capture"; S.openId = null; S.reviewMode = null; S.dispatch = null; try{ localStorage.setItem("awb.tab", S.tab); }catch(e){} render(); window.scrollTo(0,0); const el = $("#n-title"); if (el) el.focus(); },
   shortcuts(){ showShortcuts(); },
   "go-sync"(){ A.tab({dataset:{k:"export"}}); const el = $(".syncbox"); if (el) el.scrollIntoView({block:"start"}); },
@@ -1829,10 +1830,14 @@ function showShortcuts(){
 }
 
 /* ---------- boot ---------- */
-const VIEWS = {today: viewToday, board: viewBoard, exec: viewExec, projects: viewProjects, agents: viewAgents, capture: viewCapture, rules: viewRules, retro: viewRetro, export: viewExport};
+const VIEWS = {results: () => resultsUI.view(), today: viewToday, board: viewBoard, exec: viewExec, projects: viewProjects, agents: viewAgents, capture: viewCapture, rules: viewRules, retro: viewRetro, export: viewExport};
 let raf = 0; function scheduleRender(){ if (raf) return; raf = requestAnimationFrame(()=>{ raf = 0; render(); }); }
 const focusUI = window.createFocusUI({ request: (...args)=>window.hub.req(...args), changed: scheduleRender, toast, showText,
   getTasks: ()=>S.tasks, currentTask: ()=>S.openId, relevant: ()=>S.tab==="today" || !!S.openId, connected: ()=>S.mode==="db" });
+const resultsUI = window.createResultsUI({ request: (...args)=>window.hub.req(...args), changed: scheduleRender, toast, showText,
+  getTasks: ()=>S.tasks, connected: ()=>S.mode==="db", linked: ()=>focusUI.invalidate(),
+  openDelivery: (id, revision)=>{ S.deliverySelection.set(id, revision); A.open({dataset:{id}}); }
+});
 function subErr(e){ if (e && e.code==="revoked"){ S.mode="local"; } scheduleRender(); }
 async function init(){
   render();
@@ -1842,7 +1847,7 @@ async function init(){
   S.cap.downloads = dl; S.cap.sample = sm;
   if (!db){ S.mode = "local"; render(); return; }
   S.cap.db = db; S.mode = "db";
-  db.collection("tasks").onSnapshot(s => { S.tasks = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.tasks = true; focusUI.invalidate(); if(S.openId) loadDelivery(S.openId).catch(()=>{}); scheduleRender(); }, subErr);
+  db.collection("tasks").onSnapshot(s => { S.tasks = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.tasks = true; resultsUI.invalidate(); focusUI.invalidate(); if(S.openId) loadDelivery(S.openId).catch(()=>{}); scheduleRender(); }, subErr);
   db.collection("rules").onSnapshot(s => { S.rules = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.rules = true; scheduleRender(); }, subErr);
   db.collection("retros").onSnapshot(s => { const o = {}; s.docs.forEach(d=>{ o[d.id] = Object.assign({}, d.data(), {id:d.id}); }); S.retros = o; S.loaded.retros = true; scheduleRender(); }, subErr);
   db.doc("config/main").onSnapshot(d => { if (d.exists) S.config = normalizeConfig(d.data()); S.loaded.config = true; scheduleRender(); }, subErr);

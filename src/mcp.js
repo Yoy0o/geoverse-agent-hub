@@ -3,7 +3,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { getDoc, listDocs, setDoc, updateDoc, transaction, addEvent, sessionsForTask } from "#hub/db";
-import { createFocusService, briefShape, fingerprintSchema } from "./focus.js";
+import { createFocusService, briefShape, fingerprintSchema, deferShape, reuseShape } from "./focus.js";
+import { searchDeliveries, searchShape } from "./results.js";
 import {
   STATUSES, OPEN, RISKS, REASONS, TARGETS, agentName, getTask, allTasks, allRules, getConfig, projByName, newTaskId, newTaskDoc,
   moveTask, patchTask, reviewTask, selectDelivery, applyReceipt, normReceipt, taskBrief, relevantRules, attention, metrics,
@@ -49,7 +50,24 @@ function build(agent) {
       conclusion: v.snapshot.summary, decision: v.needsDecision ? v.snapshot.decision : "", recommendation: v.snapshot.recommendation,
       nextAction: v.snapshot.nextAction, risk: v.snapshot.risk, changed: v.changes.map((c) => c.label), relatedTasks: v.snapshot.relations.map((r) => ({ id: r.taskId, type: r.type, note: r.note, status: r.status })) })),
       remaining: result.remaining.map((v) => ({ id: v.id, title: v.title })),
+      deferred: result.deferred.slice(0, 10).map(v => ({ id: v.id, title: v.title, until: v.deferral.until })),
       updates: result.updates.slice(0, 10).map((v) => ({ id: v.id, title: v.title })) });
+  });
+  server.registerTool("defer_task_attention", {
+    title: "稍后处理普通事项", description: "仅在用户明确要求稍后处理时调用。minutes=1..10080 为暂缓分钟数，0 为取消；先读 get_work_context 的指纹。只调整今日队列，不代表已读、验收或暂停执行；新变化和紧急事项会重新出现。",
+    inputSchema: { id: z.string(), ...deferShape },
+  }, async ({ id, ...input }) => {
+    try { const v = focus.defer(id, input, agent); return json({ id, deferred: v.deferred, until: v.deferral?.until }); } catch(e) { if(e.expose) return err(e.message); throw e; }
+  });
+  server.registerTool("search_deliveries", {
+    title: "检索成果", description: "按关键词和项目查找简短成果索引，默认仅当前已验收成果。scope=current 包括当前未验收成果，all 包括历史与归档。支持分页；查看完整证据再调用 get_delivery。不会自动关联或验收。",
+    inputSchema: searchShape, annotations: { readOnlyHint: true },
+  }, async input => json(searchDeliveries(allTasks(), input)));
+  server.registerTool("reuse_delivery", {
+    title: "引用具体成果版本", description: "只有用户明确选择来源与目标任务时调用。先 get_delivery 读取来源版本与验收指纹，再 get_work_context 读取目标指纹。仅写入固定版本引用与复用说明，不复制验收、不改状态、不自动执行；同一来源任务的旧引用会被明确替换。",
+    inputSchema: { id: z.string(), ...reuseShape },
+  }, async ({ id, ...input }) => {
+    try { const v = focus.reuse(id, input, agent); return json({ id, expectedFingerprint: v.fingerprint, relations: v.snapshot.relations }); } catch(e) { if(e.expose) return err(e.message); throw e; }
   });
   server.registerTool("get_work_context", {
     title: "读取可续接上下文", description: "读取当前结论、相对上次已读的变化、关联工作、依据和完整任务单。返回 expectedFingerprint；更新前需以最新指纹为依据。",

@@ -55,9 +55,11 @@ async function workbench(t, initial = []) {
       return { data: structuredClone(d) };
     }
     if (url === '/api/focus') return { items: [], remaining: [], updates: [], total: docs.size, counts: { attention: 0, updates: 0 } };
+    if (url.startsWith('/api/deliveries?')) return structuredClone(api.results || {items:[],total:0,offset:0,limit:20,nextOffset:null});
     if (url.endsWith('/focus')) throw Object.assign(new Error('No brief in fixture'), { status: 404 });
     if (url.endsWith('/lifecycle')) return lifecycle(url.split('/').at(-2));
     if (url.includes('/delivery')) {
+      (api.deliveryReads ||= []).push(url);
       const id=url.split('/')[3], result=structuredClone(api.delivery || {task:id,selected:null,versions:[],expectedFingerprint:'f'.repeat(64),blockers:[],warnings:[],reviews:[]});
       if(api.deliveryGate) await api.deliveryGate.promise;
       return result;
@@ -100,7 +102,7 @@ async function workbench(t, initial = []) {
   } };
   w.claude = { async use(name) { if (name === 'db') return db; throw new Error('disabled'); } };
   w.localStorage.setItem('awb.tab','board');
-  w.eval(source('task-edits.js')); w.eval(source('focus.js')); w.eval(source('delivery.js'));
+  w.eval(source('task-edits.js')); w.eval(source('focus.js')); w.eval(source('delivery.js')); w.eval(source('results.js'));
   w.eval(html.match(/<script>\s*([\s\S]*?)<\/script>/)[1]);
   await until(() => w.document.querySelector('#sync').textContent.includes('已连接'));
   const $ = s => w.document.querySelector(s);
@@ -109,6 +111,15 @@ async function workbench(t, initial = []) {
   const open = async id => { click('[data-act="open"][data-id="'+id+'"]'); await until(() => $('#d-title')); };
   return { w, $, click, input, open, docs, notify, api };
 }
+
+test('the results tab opens the selected historical version inside the task drawer',async t=>{
+  const id='T-results',b=await workbench(t,[task(id,'Navigation outcome')]);
+  b.api.delivery=deliveryFixture(id,'v1');b.api.delivery.currentId='D-v2';
+  b.api.results={items:[{taskId:id,title:'Navigation outcome',deliveryId:'D-v1',version:'v1',summary:'Original result',at:'2026-11-03',project:'GIS',current:false,accepted:false,matchedOn:[],reusable:true}],total:1,offset:0,limit:20,nextOffset:null};
+  b.click('#tab-results');await until(()=>b.$('[data-results-action="open"]'));b.click('[data-results-action="open"]');
+  await until(()=>b.$('#delivery-choice'));assert.equal(b.$('#delivery-choice').value,'D-v1');
+  assert(b.api.deliveryReads.includes('/api/tasks/'+id+'/delivery/D-v1'));assert.match(b.$('.drawer').textContent,/历史版本/);
+});
 
 test('create waits for acknowledgement, keeps a failed draft, prevents double submit, then opens a usable drawer', async t => {
   const b=await workbench(t); b.click('[data-act="new-task"]'); b.input('#n-title','Slow save'); b.input('#n-goal','Keep this goal');

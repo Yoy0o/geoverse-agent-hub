@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 const hash = x => crypto.createHash("sha256").update(JSON.stringify(x)).digest("hex");
 const arr = x => Array.isArray(x) ? x : [];
 const text = x => typeof x === "string" ? x : "";
+export const hasDeliveryVersion = v => !!text(v).trim() && !/^(unknown|n\/a|未知|未说明|<.*>)$/i.test(text(v).trim());
 const error = (message, status = 409) => Object.assign(new Error(message), { status, expose: true });
 const cleanScope = x => !x || /^(ok|无|none|没有)$/i.test(x.trim());
 const chronological = (a, b) => a.at.localeCompare(b.at) || (a.sequence || 0) - (b.sequence || 0) || a.id.localeCompare(b.id);
@@ -45,7 +46,7 @@ export function deliveryContext(t, selectedId = "") {
   const check = checkFor(t, selected), requirementsChanged = !!selected && selected.requirementsHash !== requirementsHash(t);
   const blockers = [], warnings = [];
   if (!selected || selected.legacy) blockers.push("请提交带成果版本的回执；旧回执没有可靠的验收绑定");
-  if (selected && (!selected.version || /^(unknown|n\/a|未知|未说明|<.*>)$/i.test(selected.version))) blockers.push("缺少成果版本，请补交实际提交号或文档版本");
+  if (selected && !hasDeliveryVersion(selected.version)) blockers.push("缺少成果版本，请补交实际提交号或文档版本");
   if (selected && requirementsChanged && !selected.legacy) blockers.push("目标、范围或验收标准已有变化，请按新要求重新交付");
   if (selected?.receipt.status === "blocked" || arr(selected?.receipt.verify).some(v => v.result === "fail")) blockers.push("这版回执包含阻塞或失败的验证");
   if (selected && !cleanScope(selected.receipt.scope)) blockers.push("这版回执包含未解决的越界声明");

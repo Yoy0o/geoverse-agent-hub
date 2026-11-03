@@ -53,7 +53,7 @@ async function runOAuth() {
 try {
   await fs.mkdir(persist, { recursive: true });
   await start(false);
-  for (const p of ["/", "/shim.js", "/focus.js", "/focus.css", "/task-edits.js", "/delivery.js", "/api/health", "/api/focus", "/api/export", "/mcp"]) {
+  for (const p of ["/", "/shim.js", "/focus.js", "/focus.css", "/task-edits.js", "/delivery.js", "/results.js", "/api/health", "/api/focus", "/api/deliveries", "/api/export", "/mcp"]) {
     check((await call(p)).status === 401, `production Access gate protects ${p}`);
   }
   check((await call("/", { headers: { "Cf-Access-Authenticated-User-Email": "hio250@163.com", Authorization: "Bearer " + token } })).status === 401, "identity header plus Hub token cannot bypass Access");
@@ -64,7 +64,7 @@ try {
   const releaseCaps = await json(await api("/api/capabilities"));
   check(releaseHealth.version === version && releaseCaps.version === version, "Node and Worker use the package release version");
   check(/^[a-f0-9]{40}$/.test(releaseHealth.build.commit) && releaseHealth.build.commit === releaseCaps.build.commit, "health and capabilities identify the same build commit");
-  for (const file of ["index.html", "shim.js", "focus.js", "focus.css", "task-edits.js", "delivery.js"]) {
+  for (const file of ["index.html", "shim.js", "focus.js", "focus.css", "task-edits.js", "delivery.js", "results.js"]) {
     const expected = createHash("sha256").update(await fs.readFile("public/" + file)).digest("hex");
     const deployed = await (await call(file === "index.html" ? "/" : "/" + file)).arrayBuffer();
     check(releaseHealth.build.assets[file] === expected && createHash("sha256").update(Buffer.from(deployed)).digest("hex") === expected, "build manifest matches served " + file);
@@ -108,7 +108,7 @@ try {
   const client = new Client({ name: "cloudflare-test", version: "1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(base + "/mcp"), { requestInit: { headers: { Authorization: "Bearer " + token } } }));
   const toolNames = (await client.listTools()).tools.map(t => t.name).sort();
-  const expectedTools = ["today", "list_tasks", "get_task", "create_task", "update_task", "start_task", "report_progress", "dispatch_task", "list_runs", "cancel_run", "submit_receipt", "move_task", "list_rules", "add_rule", "get_project", "log_note", "task_usage", "get_focus", "get_work_context", "update_work_brief", "pause_task", "resume_task", "get_delivery", "select_delivery"].sort();
+  const expectedTools = ["today", "list_tasks", "get_task", "create_task", "update_task", "start_task", "report_progress", "dispatch_task", "list_runs", "cancel_run", "submit_receipt", "move_task", "list_rules", "add_rule", "get_project", "log_note", "task_usage", "get_focus", "get_work_context", "update_work_brief", "pause_task", "resume_task", "get_delivery", "select_delivery", "defer_task_attention", "search_deliveries", "reuse_delivery"].sort();
   check(toolNames.length === expectedTools.length && expectedTools.every((name, i) => toolNames[i] === name), "MCP SDK initializes with the complete tool inventory in workerd");
   check((await client.callTool({ name: "get_task", arguments: { id } })).content[0].text.includes(id), "MCP reads shared SQLite task state");
   const context = JSON.parse((await client.callTool({ name: "get_work_context", arguments: { id } })).content[0].text);
@@ -152,6 +152,18 @@ try {
   const readyDelivery = await json(await api(`/api/tasks/${deliveryTask}/delivery`));
   await json(await api(`/api/tasks/${deliveryTask}/review`, 'POST', {action:'merge',expectedDeliveryId:readyDelivery.currentId,expectedFingerprint:readyDelivery.expectedFingerprint,verificationConfirmed:true,acceptedCriteria:[0]}));
   check((await json(await api(`/api/tasks/${deliveryTask}/delivery`))).accepted, 'workerd acceptance binds the exact delivery and check');
+  const foundDelivery = await json(await api('/api/deliveries?q=workerd-v1'));
+  check(foundDelivery.items[0].deliveryId === delivered.deliveryId && foundDelivery.items[0].accepted, 'workerd searches current accepted delivery versions');
+  const reuseTask = (await json(await api('/api/tasks', 'POST', {title:'Workerd reuse target'}))).id;
+  const reuseFocusPath = `/api/tasks/${reuseTask}/focus`, beforeReuse = await json(await api(reuseFocusPath));
+  await json(await api(reuseFocusPath+'/defer','POST',{expectedFingerprint:beforeReuse.fingerprint,minutes:60}));
+  check((await json(await api('/api/focus'))).deferred.some(v=>v.id===reuseTask), 'workerd persists deferral without marking read');
+  const reuseSource = await json(await api(`/api/tasks/${deliveryTask}/delivery`));
+  await json(await api(`/api/tasks/${reuseTask}/reuse`,'POST',{expectedFingerprint:beforeReuse.fingerprint,sourceTaskId:deliveryTask,deliveryId:delivered.deliveryId,expectedSourceFingerprint:reuseSource.expectedFingerprint,note:'Reuse route evidence, independently verify this task'}));
+  const linkedFocus = await json(await api(reuseFocusPath));
+  check(!linkedFocus.deferred && linkedFocus.unread && linkedFocus.snapshot.relations[0].delivery.id===delivered.deliveryId, 'pinned reference changes reappear without copying acceptance');
+  await json(await api('/api/focus/read','POST',{items:[{id:reuseTask,expectedFingerprint:linkedFocus.fingerprint}]}));
+  await json(await api(reuseFocusPath+'/defer','POST',{expectedFingerprint:linkedFocus.fingerprint,minutes:60}));
   // 多端同步：对端接口在 workerd 中可用
   const info = await json(await api("/api/sync/info"));
   const changes = await json(await api(`/api/sync/changes?since=-1&peer=fixture-peer`));
@@ -181,6 +193,8 @@ try {
   check(persistedLifecycle.checkpoint.reason === "Workerd checkpoint" && persistedLifecycle.checkpoint.resumedAt && persistedLifecycle.activeMs === paused.activeMs, "checkpoint and stopped workflow clock survive backup and runtime restart");
   const persistedDelivery = await json(await api(`/api/tasks/${deliveryTask}/delivery`));
   check(persistedDelivery.accepted && persistedDelivery.currentId === delivered.deliveryId && persistedDelivery.reviews.length === 1 && persistedDelivery.check.version === 'workerd-v1', 'delivery, evidence and bound acceptance survive backup and runtime restart');
+  const persistedReference = await json(await api(reuseFocusPath));
+  check(persistedReference.deferred && !persistedReference.unread && persistedReference.snapshot.relations[0].delivery.id===delivered.deliveryId && persistedReference.status==='待执行', 'deferral, read progress and pinned reuse survive backup and runtime restart');
   check((await call("/api/tasks", { headers: { Cookie: cookie } })).status === 200, "stored browser session survives runtime restart");
   const logoutStream = await call("/api/stream", { headers: { Cookie: cookie } });
   const logoutReader = logoutStream.body.getReader();
