@@ -22,7 +22,7 @@ try {
   dirty = !!execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).trim();
 } catch { /* Source archives can build, but cannot claim a verified commit. */ }
 const assets = {};
-for (const file of ["index.html", "shim.js", "focus.js", "focus.css", "task-edits.js"]) {
+for (const file of ["index.html", "shim.js", "focus.js", "focus.css", "task-edits.js", "delivery.js"]) {
   assets[file] = createHash("sha256").update(await fs.readFile(path.join(root, "public", file))).digest("hex");
 }
 await fs.writeFile(path.join(root, ".cloudflare", "release.js"), `// Generated release identity; no credentials.\nexport default ${JSON.stringify({ commit, dirty, builtAt: new Date().toISOString(), assets })};\n`);

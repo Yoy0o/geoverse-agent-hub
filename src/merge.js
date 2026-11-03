@@ -4,6 +4,11 @@ const ts = (v) => Date.parse(v || "") || 0;
 const uniqBy = (arr, key) => { const m = new Map(); for (const x of arr) if (x && typeof x === "object") m.set(key(x), x); return [...m.values()]; };
 const TERMINAL = ["已合并", "已放弃"];
 const newer = (a, b, k = "at") => (ts(a && a[k]) >= ts(b && b[k]) ? a : b);
+const facts = (a = [], b = []) => {
+  const out = new Map();
+  for (const item of [...a, ...b].filter(x => x?.id).sort((x, y) => ts(x.at) - ts(y.at) || JSON.stringify(x).localeCompare(JSON.stringify(y)))) if (!out.has(item.id)) out.set(item.id, item);
+  return [...out.values()];
+};
 
 export function mergeTask(local, remote, localAt, remoteAt) {
   const lt = Math.max(ts(local.updatedAt), ts(localAt)), rt = Math.max(ts(remote.updatedAt), ts(remoteAt));
@@ -14,11 +19,20 @@ export function mergeTask(local, remote, localAt, remoteAt) {
   out.history = history;
   const last = history[history.length - 1];
   if (last && last.to) out.status = last.to;
-  const owner = [local, remote].find((x) => x.status === out.status) || base;
+  const owner = [base, other].find((x) => x.status === out.status) || base;
+  // A later reading/telemetry write must not pair the paused state with an old running clock.
+  for (const k of ["workClock", "pauseState"]) if (owner[k]) out[k] = owner[k];
   out.reworks = uniqBy([...(local.reworks || []), ...(remote.reworks || [])], (r) => `${r.at}|${r.note || ""}`).sort((a, b) => ts(a.at) - ts(b.at)).slice(-30);
   for (const k of ["receipt", "review", "lastCheck", "exec"]) {
     const v = local[k] && remote[k] ? newer(local[k], remote[k]) : local[k] || remote[k];
     if (v) out[k] = v; else delete out[k];
+  }
+  for (const k of ["deliveries", "deliveryChecks", "deliveryReviews"]) if (local[k] || remote[k]) out[k] = facts(local[k], remote[k]);
+  if (out.deliveries?.length) {
+    out.currentDelivery = out.receipt?.deliveryId || base.currentDelivery || other.currentDelivery;
+    // Reviews retain their own revision IDs; an approval of an older version never transfers.
+    const active = out.deliveries.find(r => r.id === out.currentDelivery);
+    if (active) out.receipt = { ...active.receipt, at: out.receipt?.at || active.at, by: active.by, deliveryId: active.id };
   }
   // 阅读进度不能用更晚的文档更新时间覆盖另一端更新过的工作摘要。
   if (local.focus || remote.focus) {

@@ -115,7 +115,17 @@ bash scripts/agent/task.sh check "$ID" > "$T/check2.log" 2>&1; rc=$?
 check "修正后 check 通过" '[ $rc -eq 0 ]'
 sleep 0.3
 check "post-commit 上报提交事件" '[ "$(api "$AGENT_HUB_URL/api/tasks/$ID/activity" | jget "o.events.filter(e=>e.kind===\"commit\").length")" -ge 1 ]'
+# Deliver the actual final commit, then explicitly accept that exact version.
+FINAL_SHA=$(git rev-parse HEAD)
+FINAL_RECEIPT=$(node -e 'console.log(JSON.stringify({version:process.argv[1],status:"done",summary:"订单导出改为异步生成",verify:[{cmd:"bash scripts/agent/verify.sh",result:"pass"}],scope:"ok",risks:"无"}))' "$FINAL_SHA")
+api -X POST --data-binary "$FINAL_RECEIPT" "$AGENT_HUB_URL/api/tasks/$ID/receipt" >/dev/null
 cd "$REPO"
+BEFORE_MERGE=$(git rev-parse HEAD)
+bash scripts/agent/task.sh merge "$ID" > "$T/unapproved-merge.log" 2>&1; rc=$?
+check "未验收版本不能执行 Git 合并" '[ $rc -ne 0 ] && [ "$(git rev-parse HEAD)" = "$BEFORE_MERGE" ]'
+REVIEW=$(api "$AGENT_HUB_URL/api/tasks/$ID/delivery" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);console.log(JSON.stringify({action:"merge",expectedDeliveryId:v.currentId,expectedFingerprint:v.expectedFingerprint,verificationConfirmed:true,acceptedCriteria:v.selected.requirements.acceptance.map((_,i)=>i),note:"已人工核对导出结果"}))})')
+api -X POST --data-binary "$REVIEW" "$AGENT_HUB_URL/api/tasks/$ID/review" >/dev/null
+check "验收记录绑定实际提交" '[ "$(api "$AGENT_HUB_URL/api/tasks/$ID/delivery" | jget "o.accepted&&o.selected.version")" = "$FINAL_SHA" ]'
 bash scripts/agent/task.sh merge "$ID" > "$T/merge.log" 2>&1; rc=$?
 check "task.sh merge 成功" '[ $rc -eq 0 ]'
 check "hub 标记 已合并 且记为一次通过" '[ "$(api $AGENT_HUB_URL/api/tasks/$ID | jget "o.status+\"/\"+o.review.firstPass")" = "已合并/true" ]'

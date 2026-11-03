@@ -8,7 +8,7 @@ import { OPEN, getTask, moveTask, patchTask, taskBrief } from "./domain.js";
 
 export const RUN_ACTIVE = ["queued", "claimed", "ready", "running"];
 export const RUN_MODES = ["exec", "prepare", "handoff", "manual"];
-export const RUN_LABEL = { queued: "排队中", claimed: "已领取", ready: "待启动", running: "执行中", blocked: "阻塞", done: "已交付", failed: "失败", cancelled: "已取消", lost: "失联", superseded: "已替代", stalled: "停滞", waiting: "等待执行端" };
+export const RUN_LABEL = { queued: "排队中", claimed: "已领取", ready: "待启动", running: "执行中", stopping: "等待停止确认", blocked: "阻塞", done: "已交付", failed: "失败", cancelled: "已取消", lost: "失联", superseded: "已替代", stalled: "停滞", waiting: "等待执行端" };
 export const MODE_LABEL = { exec: "自动执行", prepare: "准备工作区", handoff: "交给 Agent", manual: "手动开工" };
 const NOT_AGENTS = ["git", "task-sh", "human", "mcp", "runner", "hub", "exec", "sync"];
 
@@ -26,6 +26,7 @@ export const runnerOnline = (r) => !!(r && r.lastSeen && Date.now() - Date.parse
 export function runHealth(run, runner) {
   if (!run) return "";
   if (!RUN_ACTIVE.includes(run.status)) return run.status;
+  if (run.cancel) return "stopping";
   if (run.status === "queued") return run.runner && !runnerOnline(runner) ? "waiting" : "queued";
   if (run.mode === "exec" && run.runner && !runnerOnline(runner)) return "lost";
   const last = Date.parse(run.heartbeatAt || run.startedAt || run.claimedAt || run.createdAt) || 0;
@@ -51,7 +52,7 @@ function syncExec(taskId, run) {
   const rn = run.runner ? getRunner(run.runner) : null;
   const prev = t.exec && t.exec.run === run.id ? t.exec : {};
   const exec = {
-    run: run.id, status: run.status, mode: run.mode, location: run.location, runner: run.runner, runnerName: rn ? rn.name : prev.runnerName || "",
+    run: run.id, status: run.status, cancel: run.cancel, mode: run.mode, location: run.location, runner: run.runner, runnerName: rn ? rn.name : prev.runnerName || "",
     host: run.host || (rn ? rn.host : ""), agent: run.agent, progress: run.progress, step: run.step, note: run.note,
     heartbeatAt: run.heartbeatAt, startedAt: run.startedAt, endedAt: run.endedAt, attempts: listRuns({ task: taskId, limit: 1000 }).length, at: nowIso(),
   };
@@ -99,6 +100,7 @@ function sameRun(act, o) {
  * 有对应的进行中执行就接手它，否则新建一条（旧的进行中执行标记为已替代）。
  */
 export function startRun(t, o = {}, origin = "hub") {
+  if (t.status === "已暂停") throw httpError(409, "任务已暂停，请先恢复并读取断点后再开工");
   const at = nowIso();
   let run = o.run && validId(String(o.run)) ? getRun(String(o.run)) : null;
   if (run && (run.task !== t.id || !RUN_ACTIVE.includes(run.status))) run = null;
@@ -136,6 +138,9 @@ const STEP = {
 const CREATING = ["session.start", "prompt", "edit"];
 export function touchFromEvent(t, e) {
   if (!t) return null;
+  if (t.status === "已暂停") return null; // Late hooks must not restart paused work.
+  if (t.status === "待执行" && t.pauseState?.resumedAt) return null;
+  if (e.run && getRun(e.run) && !RUN_ACTIVE.includes(getRun(e.run).status)) return null;
   let run = e.run && validId(String(e.run)) ? getRun(String(e.run)) : null;
   if (run && (run.task !== t.id || !RUN_ACTIVE.includes(run.status))) run = null;
   if (!run) run = activeRun(t.id);
@@ -165,6 +170,8 @@ export function touchFromEvent(t, e) {
 /* ---------------- 进度 ---------------- */
 // 进度上报：MCP report_progress、hub.sh progress、task.sh progress。acceptance 是完成的验收标准序号（从 0 开始）
 export function reportProgress(t, b = {}, origin = "hub") {
+  if (t.status === "已暂停") throw httpError(409, "任务已暂停，进度不会重启执行；请先恢复任务");
+  if (t.status === "待执行" && t.pauseState?.resumedAt) throw httpError(409, "任务已恢复到待执行，请先显式开工再上报进度");
   let run = b.run && validId(String(b.run)) ? getRun(String(b.run)) : null;
   if (run && (run.task !== t.id || !RUN_ACTIVE.includes(run.status))) run = null;
   if (!run) run = activeRun(t.id);
@@ -201,7 +208,7 @@ export function handoffPrompt(t) {
   ].join("\n");
 }
 export function dispatch(t, b = {}, origin = "human") {
-  if (["待评审", "已合并", "已放弃"].includes(t.status)) throw httpError(409, `任务处于「${t.status}」，不能派发；退回修改或重新打开后再派发`);
+  if (["已暂停", "待评审", "已合并", "已放弃"].includes(t.status)) throw httpError(409, `任务处于「${t.status}」，不能派发；先恢复、退回修改或重新打开后再派发`);
   const mode = ["exec", "prepare", "handoff"].includes(b.mode) ? b.mode : "prepare";
   let rn = null;
   if (b.runner && mode !== "handoff") {
@@ -222,6 +229,7 @@ export function dispatch(t, b = {}, origin = "human") {
 export function cancelRun(runId, origin = "human") {
   const run = getRun(runId); if (!run) throw httpError(404, "找不到执行记录 " + runId);
   if (!RUN_ACTIVE.includes(run.status)) return runView(run);
+  if (run.cancel) return runView(run); // A repeated request is not a stop acknowledgement.
   const rn = run.runner ? getRunner(run.runner) : null;
   // 执行端正在跑的进程：先请求取消，执行端下一次心跳时停止进程；执行端离线或没有进程时直接结束
   if (run.mode === "exec" && ["claimed", "running"].includes(run.status) && runnerOnline(rn) && !run.cancel) {
@@ -249,6 +257,7 @@ export function removeRunner(id) {
   return deleteRunner(id);
 }
 function claimable(run, rn) {
+  if (getTask(run.task)?.status === "已暂停" || run.cancel) return false;
   if (run.status !== "queued" || !["exec", "prepare"].includes(run.mode)) return false;
   if (run.mode === "exec" && rn.mode !== "exec") return false;
   if (run.runner) return run.runner === rn.id;
@@ -262,7 +271,11 @@ export function runnerHeartbeat(id, b = {}) {
   const alive = new Set((Array.isArray(b.runs) ? b.runs : []).map((r) => String(r && r.id || r)));
   const cancel = [];
   for (const run of listRuns({ runner: id, statuses: RUN_ACTIVE, limit: 100 })) {
-    if (run.cancel) { cancel.push(run.id); continue; }
+    if (run.cancel) {
+      if (!alive.has(run.id)) applyRun(run, { status: "cancelled", endedAt: nowIso(), step: "执行端确认已停止" });
+      else cancel.push(run.id);
+      continue;
+    }
     if (alive.has(run.id)) applyRun(run, { heartbeatAt: nowIso() });
     else if (run.mode === "exec" && ["claimed", "running"].includes(run.status)) {
       // 执行端重启后丢失了进程：这次执行没有结果
@@ -298,6 +311,10 @@ export function runUpdate(runId, b = {}, origin = "runner") {
   if (b.exitCode != null && Number.isFinite(Number(b.exitCode))) f.exitCode = Number(b.exitCode);
   // 已结束的执行（取消、回执已到）只补记退出码，迟到的步骤回报不覆盖最终状态
   if (!active) return runView(Object.keys(f).length ? applyRun(run, f) : run);
+  if (run.cancel) {
+    if (["cancelled", "exited", "failed"].includes(b.status)) return runView(applyRun(run, { ...f, status: "cancelled", endedAt: at, step: "执行已停止", note: b.note ? clip(b.note, 500) : run.note }));
+    return runView(run);
+  }
   for (const k of ["worktree", "branch", "session", "host"]) if (b[k]) f[k] = clip(b[k], 300);
   if (b.step) f.step = clip(b.step);
   if (b.note) f.note = clip(b.note, 500);
@@ -333,6 +350,7 @@ function onTaskDoc(e) {
   const at = nowIso();
   if (e.op === "delete") { act.forEach((r) => applyRun(r, { status: "cancelled", cancel: true, endedAt: at, note: "任务已删除" })); return; }
   const d = e.data || {};
+  if (d.status === "已暂停") { requestPauseStop(e.id); return; }
   if (d.status === "已合并" || d.status === "已放弃") {
     for (const r of act) applyRun(r, d.status === "已合并" && r.status !== "queued" ? { status: "done", progress: 100, endedAt: at, step: "已合并" } : { status: "cancelled", cancel: true, endedAt: at, step: d.status === "已合并" ? "任务已合并" : "任务已放弃" });
     return;
@@ -343,6 +361,15 @@ function onTaskDoc(e) {
     const fresh = rc && rc.at && Date.parse(rc.at) >= Date.parse(r.createdAt);
     if (fresh && !r.receipt) applyRun(r, d.status === "需介入" ? { status: "blocked", receipt: true, endedAt: at, step: "回执：阻塞" } : { status: "done", receipt: true, progress: 100, endedAt: at, step: "已交付回执" });
     else if (d.status === "待评审" && !fresh) applyRun(r, { status: "done", progress: 100, endedAt: at, step: "已提交评审" });
+  }
+}
+// Pause is a workflow state. Only a runner acknowledgement proves its process stopped.
+export function requestPauseStop(taskId) {
+  for (const r of listRuns({ task: taskId, statuses: RUN_ACTIVE, limit: 1000 })) {
+    if (r.cancel) continue;
+    applyRun(r, r.status === "queued"
+      ? { status: "cancelled", cancel: true, endedAt: nowIso(), step: "暂停任务，取消排队" }
+      : { cancel: true, step: r.mode === "exec" && r.runner ? "任务已暂停，等待执行端停止" : "任务已暂停，请在外部停止 Agent" });
   }
 }
 // 在 Hub 实例创建时调用一次（Cloudflare 每个 Durable Object 实例各自注册到自己的事件总线）

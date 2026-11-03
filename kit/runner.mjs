@@ -16,7 +16,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 
-const VERSION = "0.4.0";
+const VERSION = "0.5.0";
 const args = process.argv.slice(2);
 const cmd = args[0] && !args[0].startsWith("--") ? args[0] : "help";
 const opt = (k, d) => { const i = args.indexOf("--" + k); return i >= 0 && args[i + 1] !== undefined && !args[i + 1].startsWith("--") ? args[i + 1] : d; };
@@ -188,6 +188,10 @@ async function handle({ run, task }) {
   if (st.status !== 0) return fail("task.sh start 失败：" + tail(st.stderr || st.stdout, 300));
   const wt = String(spawnSync(bash, ["scripts/agent/task.sh", "path", task.id], { cwd: repo, env, encoding: "utf8" }).stdout || "").trim();
   if (!wt || !fs.existsSync(wt)) return fail("找不到任务的 worktree");
+  const latest = await api("GET", `/api/runs/${encodeURIComponent(run.id)}`);
+  if (latest.cancel || !["queued", "claimed", "ready", "running"].includes(latest.status)) {
+    active.delete(run.id); await update(run.id, { status: "cancelled", note: "启动前收到停止请求" }); return;
+  }
   if (run.mode !== "exec") {
     active.delete(run.id);
     await update(run.id, { status: "ready", worktree: wt, step: "工作区已就绪，等待启动 Agent" });
@@ -224,7 +228,7 @@ async function handle({ run, task }) {
       let text = "";
       try { const size = fs.statSync(logFile).size; const fd = fs.openSync(logFile, "r"); const n = Math.min(size, 262144); const buf = Buffer.alloc(n); fs.readSync(fd, buf, 0, n, size - n); fs.closeSync(fd); text = buf.toString("utf8"); } catch { /* 没有输出 */ }
       if (/agent-work-brief/i.test(text)) await api("POST", `/api/tasks/${encodeURIComponent(task.id)}/focus/report?agent=${encodeURIComponent(run.agent || "runner")}`, { text }).catch((e) => log("! 阶段摘要未写入（请重新读取上下文）：" + e.message));
-      if (/agent-receipt/i.test(text)) await api("POST", `/api/tasks/${encodeURIComponent(task.id)}/receipt?agent=${encodeURIComponent(run.agent || "runner")}`, { text }).catch((e) => log("! 回执上报失败：" + e.message));
+      if (/agent-receipt/i.test(text)) await api("POST", `/api/tasks/${encodeURIComponent(task.id)}/receipt?agent=${encodeURIComponent(run.agent || "runner")}&run=${encodeURIComponent(run.id)}`, { text }).catch((e) => log("! 回执上报失败：" + e.message));
       const exitCode = code ?? (signal ? 128 : 1);
       log(`${exitCode === 0 ? "✓" : "✗"} ${task.id} Agent 已退出（${signal || "退出码 " + exitCode}）· 输出：${logFile}`);
       await update(run.id, { status: "exited", exitCode });
@@ -248,9 +252,13 @@ function stop(runId, why) {
   } catch { /* 已退出 */ }
 }
 
-async function cycle() {
+async function heartbeat() {
   const hb = await api("POST", `/api/runners/${encodeURIComponent(CONF.id)}/heartbeat`, { runs: [...active.keys()].map((id) => ({ id })), version: VERSION });
   for (const id of hb.cancel || []) stop(id, "工作台取消或任务已结束");
+  return hb;
+}
+async function cycle() {
+  const hb = await heartbeat();
   let free = CONF.max - [...active.values()].filter((a) => a.child && !a.cancelled).length;
   for (let n = hb.queued || 0; n > 0 && free > 0; n--) {
     const c = await api("POST", `/api/runners/${encodeURIComponent(CONF.id)}/claim`, {});
@@ -273,7 +281,13 @@ async function start(once) {
   if (!once) log(`执行端「${CONF.name}」已上线 → ${CONN.url}（${CONF.mode === "exec" ? "自动执行" : "只准备工作区"}，每 ${Number(opt("interval", 30))} 秒检查一次，Ctrl+C 退出）`);
   if (once) {
     await cycle();
-    await Promise.all([...active.values()].map((a) => a.done).filter(Boolean));
+    // Even a single run must receive stop requests while its child is alive.
+    let beating = false;
+    const timer = setInterval(async () => {
+      if (beating) return; beating = true;
+      try { await heartbeat(); } catch (e) { log("! 心跳失败：" + e.message); } finally { beating = false; }
+    }, Math.max(3, Number(opt("interval", 30)) || 30) * 1000);
+    try { await Promise.all([...active.values()].map((a) => a.done).filter(Boolean)); } finally { clearInterval(timer); }
     await api("POST", `/api/runners/${encodeURIComponent(CONF.id)}/heartbeat`, { runs: [], version: VERSION }).catch(() => {});
     return;
   }

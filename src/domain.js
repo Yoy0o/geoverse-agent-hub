@@ -1,11 +1,13 @@
 // 任务领域逻辑：与界面里的规则保持一致（状态流、回执解析、任务单生成、指标）
 import crypto from "node:crypto";
-import { getDoc, setDoc, updateDoc, listDocs } from "#hub/db";
+import { getDoc, setDoc, updateDoc, listDocs, getRun, addEvent, transaction } from "#hub/db";
 import { config } from "#hub/config";
 import { WORK_BRIEF_GUIDE, workContext } from "./work-brief.js";
+import { activeMs } from "./task-time.js";
+import { deliveryHistory, versionReceipt, bindReview, deliveryContext, requirementsHash } from "./delivery.js";
 
-export const STATUSES = ["待规格", "待执行", "执行中", "需介入", "待评审", "已合并", "已放弃"];
-export const OPEN = ["待规格", "待执行", "执行中", "需介入", "待评审"];
+export const STATUSES = ["待规格", "待执行", "执行中", "已暂停", "需介入", "待评审", "已合并", "已放弃"];
+export const OPEN = ["待规格", "待执行", "执行中", "已暂停", "需介入", "待评审"];
 export const RISKS = ["L1", "L2", "L3", "L4"];
 export const REASONS = ["规格不清", "上下文缺失", "越界改动", "验证不足", "设计问题", "代码质量", "安全隐患", "Agent 能力不足"];
 export const TARGETS = ["AGENTS.md", "CLAUDE.md", ".cursor/rules", "评审清单", "验证脚本", "任务单模板"];
@@ -75,7 +77,9 @@ export function patchTask(id, patch, origin = "hub") {
   patch.updatedAt = nowIso();
   return updateDoc("tasks", id, patch, origin);
 }
-export function moveTask(t, to, extra, origin = "hub") {
+export function moveTask(t, to, extra, origin = "hub", lifecycle = false, reviewed = false) {
+  if (!lifecycle && (t.status === "已暂停" || to === "已暂停")) throw Object.assign(new Error("暂停或恢复请使用 pause_task / resume_task，并保存断点"), { status: 409, expose: true });
+  if (to === "已合并" && deliveryHistory(t).length && !reviewed) throw Object.assign(new Error("请读取成果版本并通过评审接口验收，不能用状态修改代替验收"), { status: 409, expose: true });
   const at = nowIso();
   const patch = Object.assign({ status: to, history: (t.history || []).concat([{ at, from: t.status, to, by: origin }]).slice(-40) }, extra || {});
   if (to === "执行中" && !t.startedAt) patch.startedAt = at;
@@ -83,13 +87,36 @@ export function moveTask(t, to, extra, origin = "hub") {
   return patchTask(t.id, patch, origin);
 }
 // 评审语义：合并 / 退回 / 放弃（界面、MCP、task.sh 共用）
-export function reviewTask(t, action, { reasons = [], note = "", dropReason = "" } = {}, origin = "hub") {
-  const at = nowIso();
-  const sel = (reasons || []).filter((r) => typeof r === "string").slice(0, 10);
-  if (action === "merge") return moveTask(t, "已合并", { review: { at, firstPass: !(t.reworks || []).length, reasons: sel, note: String(note || "") } }, origin);
-  if (action === "rework") return moveTask(t, "执行中", { reworks: (t.reworks || []).concat([{ at, reasons: sel, note: String(note || "") }]).slice(-30) }, origin);
-  if (action === "drop") return moveTask(t, "已放弃", { dropReason: String(dropReason || sel[0] || "需求取消"), dropNote: String(note || "") }, origin);
-  throw new Error("unknown review action");
+export function reviewTask(t, action, input = {}, origin = "hub") {
+  return transaction(() => {
+    t = getTask(t.id);
+    const { reasons = [], note = "", dropReason = "" } = input;
+    const at = nowIso();
+    const sel = (reasons || []).filter((r) => typeof r === "string").slice(0, 10);
+    const binding = ["merge", "rework"].includes(action) && deliveryHistory(t).length ? bindReview(t, action, input, origin) : null;
+    const extra = binding ? { deliveryReviews: (t.deliveryReviews || []).concat([binding]) } : {};
+    if (action === "merge") return moveTask(t, "已合并", { ...extra, ...(binding ? { acceptance: (t.acceptance || []).map(a => ({ ...a, done: true })) } : {}), review: { at, firstPass: !(t.reworks || []).length, reasons: sel, note: String(note || ""), ...(binding ? { deliveryId: binding.deliveryId, version: binding.version, reviewId: binding.id } : { legacy: true }) } }, origin, false, true);
+    if (action === "rework") return moveTask(t, "执行中", { ...extra, acceptance: (t.acceptance || []).map(a => ({ ...a, done: false })), reworks: (t.reworks || []).concat([{ at, reasons: sel, note: String(note || ""), ...(binding ? { deliveryId: binding.deliveryId, version: binding.version } : {}) }]).slice(-30) }, origin);
+    if (action === "drop") return moveTask(t, "已放弃", { dropReason: String(dropReason || sel[0] || "需求取消"), dropNote: String(note || "") }, origin);
+    throw new Error("unknown review action");
+  });
+}
+
+export function selectDelivery(id, revisionId, input, origin = "human") {
+  return transaction(() => {
+    const t = getTask(id);
+    if (!t) throw Object.assign(new Error("找不到任务"), { status: 404, expose: true });
+    const v = deliveryContext(t), r = deliveryHistory(t).find(r => r.id === revisionId);
+    const reject = message => { throw Object.assign(new Error(message), { status: 409, expose: true }); };
+    if (input?.expectedFingerprint !== v.expectedFingerprint) reject("成果或验收依据已变化，请重新读取后再选择");
+    if (!["待执行", "待评审"].includes(t.status)) reject("请先恢复或重新打开任务到待执行；执行中的任务应先停下再切换成果");
+    if (!r || r.legacy || r.requirementsHash !== requirementsHash(t)) reject("该版本不存在、缺少需求快照或已不符合当前要求，请重新交付");
+    const bad = r.receipt.status === "blocked" || r.receipt.verify.some(v => v.result === "fail");
+    const at = nowIso();
+    moveTask(t, bad ? "需介入" : "待评审", { currentDelivery: r.id, receipt: { ...r.receipt, at, by: r.by, deliveryId: r.id }, acceptance: (t.acceptance || []).map(a => ({ ...a, done: false })) }, origin);
+    addEvent({ agent: origin, kind: "delivery_selected", task: id, summary: "明确选择成果版本：" + r.version, data: { deliveryId: r.id, previous: v.currentId } });
+    return { task: getTask(id), delivery: deliveryContext(getTask(id)) };
+  });
 }
 
 /* ---------------- 交付回执 ---------------- */
@@ -120,7 +147,7 @@ export function parseReceipt(raw) {
     changed: list(out.changed), verify,
     scope: typeof out.scope === "string" ? out.scope : "",
     risks: typeof out.risks === "string" ? out.risks : "",
-    session: typeof out.session === "string" ? out.session : "",
+    session: typeof out.session === "string" ? out.session : "", version: typeof out.version === "string" ? out.version : "", run: typeof out.run === "string" ? out.run : "",
     cost: num(out.cost), minutes: num(out.minutes), ciRounds: num(out.ci_rounds), lines: num(out.lines),
   };
 }
@@ -148,7 +175,7 @@ export function normReceipt(o) {
   return {
     task: o.task ? String(o.task) : "", status: /block/i.test(String(o.status || "")) ? "blocked" : "done", summary: String(o.summary || ""), changed: arr(o.changed),
     verify: Array.isArray(o.verify) ? o.verify.map((v) => ({ cmd: String((v && v.cmd) || v || ""), result: ["pass", "fail"].includes(v && v.result) ? v.result : "unknown" })).filter((v) => v.cmd) : [],
-    scope: String(o.scope || ""), risks: String(o.risks || ""), session: o.session ? String(o.session) : "",
+    scope: String(o.scope || ""), risks: String(o.risks || ""), session: o.session ? String(o.session) : "", version: String(o.version || ""), run: String(o.run || ""),
     cost: num(o.cost), minutes: num(o.minutes), ciRounds: num(o.ci_rounds ?? o.ciRounds), lines: num(o.lines),
   };
 }
@@ -163,12 +190,30 @@ export function receiptPatch(t, r, by) {
   return { patch, to: bad ? "需介入" : "待评审" };
 }
 export function scopeOk(s) { return !s || /^(ok|无|none|没有)$/i.test(String(s).trim()); }
-// 写入回执并推进状态；同一个回执（hash 相同）重复到达时忽略
-export function applyReceipt(t, r, origin = "hub") {
-  if (r.hash && t.receipt && t.receipt.hash === r.hash) return { skipped: true, task: t };
-  const { patch, to } = receiptPatch(t, r, origin);
-  const d = ["待评审", "已合并", "已放弃"].includes(t.status) ? patchTask(t.id, patch, origin) : moveTask(t, to, patch, origin);
-  return { skipped: false, to: d.data.status, task: Object.assign({}, d.data, { id: t.id }) };
+// 写入不可变成果并推进状态；相同语义的回执重放不会覆盖当前成果。
+export function applyReceipt(t, r, origin = "hub", runId = "") {
+  return transaction(() => {
+    t = getTask(t.id);
+    runId = runId || r.run || t.exec?.run || "";
+    const source = runId ? getRun(runId) : null;
+    if (source && source.task !== t.id) throw Object.assign(new Error("执行编号不属于当前任务"), { status: 400, expose: true });
+    // The currently pausing run may finish its receipt; a different run is always historical.
+    const retired = (runId && t.exec?.run && runId !== t.exec.run) || source?.status === "superseded" || (source?.cancel && t.status !== "已暂停");
+    const archivedReason = ["已合并", "已放弃"].includes(t.status) ? "任务结束后到达" : retired ? "来自旧执行" : "";
+    const versioned = versionReceipt(t, r, origin, runId, archivedReason);
+    if (versioned.duplicate) return { skipped: true, task: t, deliveryId: versioned.revision.id, archived: !!versioned.revision.archivedReason };
+    if (archivedReason) {
+      patchTask(t.id, versioned.patch, origin);
+      addEvent({ agent: origin, kind: "receipt_late", task: t.id, summary: "旧执行回执已保留，未覆盖当前工作：" + (r.summary || "").slice(0, 120), data: { run: runId, deliveryId: versioned.revision.id, receipt: r } });
+      t = getTask(t.id);
+      return { skipped: true, task: t, deliveryId: versioned.revision.id, archived: true };
+    }
+    const { patch, to } = receiptPatch(t, r, origin);
+    Object.assign(patch, versioned.patch);
+    const keepStatus = t.status === "已暂停" || (t.status === "待执行" && t.pauseState?.resumedAt);
+    const d = keepStatus ? patchTask(t.id, patch, origin) : moveTask(t, to, patch, origin);
+    return { skipped: false, to: d.data.status, task: Object.assign({}, d.data, { id: t.id }), deliveryId: versioned.revision.id };
+  });
 }
 
 /* ---------------- 任务单 ---------------- */
@@ -181,6 +226,8 @@ export const RECEIPT_TEMPLATE = [
   "task: <任务编号，如 T260922-a1b>",
   "status: done | blocked",
   "summary: <一句话说明做了什么>",
+  "version: <实际 Git 提交号或文档/实验版本；不要猜测>",
+  "run: <当前执行编号，未知留空>",
   "changed:",
   "  - <改动的文件路径>",
   "verify:",
@@ -245,6 +292,7 @@ export function metrics(tasks, s, e) {
 }
 // 执行摘要（task.exec）超过阈值没有心跳：Agent 可能卡住、会话已结束但没交付，或机器已关机
 export function stalled(t, now = Date.now()) {
+  if (t.status === "已暂停") return false;
   const e = t.exec;
   if (!e || !["claimed", "ready", "running"].includes(e.status) || !OPEN.includes(t.status)) return false;
   const last = Date.parse(e.heartbeatAt || e.startedAt || e.at) || 0;
@@ -258,8 +306,8 @@ export function attention(tasks) {
     if (t.status === "需介入") items.push({ id: t.id, title: t.title, level: "需介入", since: lastEntered(t, "需介入") || t.updatedAt, agent: t.agent, project: t.project });
     else if (t.status === "待评审") items.push({ id: t.id, title: t.title, level: "待评审", since: lastEntered(t, "待评审") || t.updatedAt, waitMin: Math.round((now - new Date(lastEntered(t, "待评审") || t.updatedAt || t.createdAt)) / 60000), agent: t.agent, project: t.project });
     else if (stalled(t, now)) items.push({ id: t.id, title: t.title, level: "执行停滞", since: t.exec.heartbeatAt || t.exec.at, idleMin: Math.round((now - Date.parse(t.exec.heartbeatAt || t.exec.at)) / 60000), where: execWhere(t.exec), agent: t.agent, project: t.project });
-    else if (t.exec && t.exec.status === "queued" && OPEN.includes(t.status) && now - Date.parse(t.exec.at || t.updatedAt) > 30 * 60000) items.push({ id: t.id, title: t.title, level: "派发未领取", since: t.exec.at, agent: t.agent, project: t.project });
-    else if (t.status === "执行中" && num(t.budgetMin) && t.startedAt) { const run = (now - new Date(t.startedAt)) / 60000; if (run > num(t.budgetMin)) items.push({ id: t.id, title: t.title, level: "超出时长预算", runMin: Math.round(run), budgetMin: t.budgetMin, agent: t.agent, project: t.project }); }
+    else if (t.status !== "已暂停" && t.exec && t.exec.status === "queued" && OPEN.includes(t.status) && now - Date.parse(t.exec.at || t.updatedAt) > 30 * 60000) items.push({ id: t.id, title: t.title, level: "派发未领取", since: t.exec.at, agent: t.agent, project: t.project });
+    else if (t.status === "执行中" && num(t.budgetMin)) { const run = activeMs(t, now) / 60000; if (run > num(t.budgetMin)) items.push({ id: t.id, title: t.title, level: "超出时长预算", runMin: Math.round(run), budgetMin: t.budgetMin, agent: t.agent, project: t.project }); }
   });
   const order = { "需介入": 0, "待评审": 1, "执行停滞": 2, "派发未领取": 3, "超出时长预算": 4 };
   return items.sort((a, b) => order[a.level] - order[b.level] || (b.waitMin || 0) - (a.waitMin || 0));

@@ -36,7 +36,7 @@ try {
   if (caps.version !== version || caps.build?.commit !== expected) throw new Error('能力接口与健康接口的版本不一致。');
   const focus = await json('/api/focus');
   if (!Array.isArray(focus.items) || !focus.counts) throw new Error('决策卡接口未就绪。');
-  for (const file of ['index.html','shim.js','focus.js','focus.css','task-edits.js']) {
+  for (const file of ['index.html','shim.js','focus.js','focus.css','task-edits.js','delivery.js']) {
     const expectedHash = createHash('sha256').update(await fs.readFile(new URL('public/' + file, root))).digest('hex');
     const bytes = await (await get(file === 'index.html' ? '/' : '/' + file)).arrayBuffer();
     const actualHash = createHash('sha256').update(Buffer.from(bytes)).digest('hex');

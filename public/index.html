@@ -100,6 +100,7 @@ main{padding-top:16px}
 .pill.mono{font-size:11px;font-weight:600}
 .st-待规格,.st-待执行{background:var(--surface-2);color:var(--ink-2)}
 .st-执行中{background:var(--accent-soft);color:var(--accent)}
+.st-已暂停{background:var(--surface-2);color:var(--muted)}
 .st-需介入{background:var(--bad-soft);color:var(--bad)}
 .st-待评审{background:var(--warn-soft);color:var(--warn)}
 .st-已合并{background:var(--ok-soft);color:var(--ok)}
@@ -281,12 +282,13 @@ details.more summary{cursor:pointer;font-size:14px;font-weight:500}
 <script src="/shim.js"></script>
 <script src="/focus.js"></script>
 <script src="/task-edits.js"></script>
+<script src="/delivery.js"></script>
 <script>
 (function(){
 "use strict";
 /* ---------- constants ---------- */
-const STATUSES = ["待规格","待执行","执行中","需介入","待评审","已合并","已放弃"];
-const OPEN = ["待规格","待执行","执行中","需介入","待评审"];
+const STATUSES = ["待规格","待执行","执行中","已暂停","需介入","待评审","已合并","已放弃"];
+const OPEN = ["待规格","待执行","执行中","已暂停","需介入","待评审"];
 const RISKS = ["L1","L2","L3","L4"];
 const RISK_TIP = {L1:"机械型：依赖升级、lint 修复、配置、迁移",L2:"常规型：小功能、缺陷修复、补测试",L3:"复杂型：跨模块、核心逻辑",L4:"高风险：鉴权、资金、数据删除、对外契约"};
 const REASONS = ["规格不清","上下文缺失","越界改动","验证不足","设计问题","代码质量","安全隐患","Agent 能力不足"];
@@ -298,14 +300,16 @@ const NEXT = {
   "待执行":[["执行中","开始执行"]],
   "执行中":[["待评审","提交评审"],["需介入","需要介入"]],
   "需介入":[["执行中","已处理，继续"],["已放弃","放弃"]],
-  "待评审":[["__merge","评审通过并合并"],["__rework","退回修改"],["已放弃","放弃"]],
-  "已合并":[],"已放弃":[["待执行","重新打开"]]
+  "待评审":[["__merge","验收当前成果"],["__rework","退回修改"],["已放弃","放弃"]],
+  "已暂停":[],"已合并":[["待评审","重新评审当前版本"],["待执行","重新打开任务"]],"已放弃":[["待执行","重新打开"]]
 };
 
 /* ---------- state ---------- */
 const S = {
   tab: "today", tasks: [], rules: [], retros: {}, config: {agents: DEFAULT_AGENTS.slice(), projects: []},
   mode: "loading", openId: null, reviewMode: null, weekOffset: 0,
+  delivery: new Map(), deliverySelection: new Map(), deliveryRequests: new Map(), deliveryError: "", reviewDraft: null, reviewBusy: false, receiptDraft: {}, receiptBusy: false,
+  pauseDraft: null, lifecycle: new Map(), lifecycleBusy: false, lifecycleError: "",
   creating: false, createAttempt: null, createDraft: {}, createError: "", writes: 0, writeError: "", wrote: false,
   filter: {project: "", agent: "", q: "", closed: false},
   loaded: {tasks:false, rules:false, retros:false, config:false},
@@ -454,10 +458,10 @@ function attention(){
     if (t.status==="需介入") items.push({t, lvl:"bad", pri:0, note:"需介入 · "+(ago(lastEntered(t,"需介入")||t.updatedAt)||"")});
     else if (t.status==="待评审"){ const w = Date.now()-new Date(lastEntered(t,"待评审")||t.updatedAt||t.createdAt); items.push({t, lvl:"warn", pri:1, wait:w, note:"待评审 · 已等待 "+dur(w)}); }
     else {
-      const r = OPEN.includes(t.status) ? execOf(t) : null;
+      const r = t.status!=="已暂停" && OPEN.includes(t.status) ? execOf(t) : null;
       if (r && (r.health==="stalled" || r.health==="lost")) items.push({t, lvl: r.health==="lost" ? "bad" : "warn", pri:2, note:(r.health==="lost" ? "执行端离线，执行失联" : "执行停滞 · "+beat(r))+" · "+whereText(r)});
       else if (r && (r.health==="waiting" || (r.health==="queued" && Date.now()-Date.parse(r.createdAt||r.at) > 30*60000))) items.push({t, lvl:"acc", pri:3, note:(r.mode==="handoff" ? "等待云端 Agent 接手" : "派发后还没有执行端领取")+" · "+ago(r.createdAt||r.at)});
-      else if (t.status==="执行中" && num(t.budgetMin) && t.startedAt){ const run=(Date.now()-new Date(t.startedAt))/60000; if(run>num(t.budgetMin)) items.push({t, lvl:"acc", pri:4, note:"超出时长预算 · 已运行 "+dur(run*60000)+" / 预算 "+t.budgetMin+" 分"}); }
+      else if (t.status==="执行中" && num(t.budgetMin)){ const run=activeTaskMs(t)/60000; if(run>num(t.budgetMin)) items.push({t, lvl:"acc", pri:4, note:"超出时长预算 · 已运行 "+dur(run*60000)+" / 预算 "+t.budgetMin+" 分"}); }
     }
   });
   return items.sort((a,b)=>a.pri-b.pri || (b.wait||0)-(a.wait||0));
@@ -490,7 +494,7 @@ function restoreCreateDraft(){
 function withPreserved(root, preserve, fn){
   if (!preserve) { fn(); restoreTaskEdits(root); return; }
   const vals = {};
-  $$("input[id],textarea[id],select[id]", root).filter(el => !el.dataset.f).forEach(el => { vals[el.id] = (el.type==="checkbox"||el.type==="radio") ? {c:el.checked} : {v:el.value}; });
+  $$("input[id],textarea[id],select[id]", root).filter(el => !el.dataset.f && !el.dataset.pause && !el.closest("[data-state-form]") && !["delivery-choice","d-receipt"].includes(el.id)).forEach(el => { vals[el.id] = (el.type==="checkbox"||el.type==="radio") ? {c:el.checked} : {v:el.value}; });
   const a = document.activeElement; const act = a && root.contains(a) && a.id ? a.id : null;
   let sel = null; try { if (act && a.selectionStart!=null) sel = [a.selectionStart, a.selectionEnd]; } catch(e){}
   const scrollers = $$("[data-keep-scroll]", root).map(el=>[el.dataset.keepScroll, el.scrollTop, el.scrollLeft]);
@@ -614,7 +618,7 @@ function viewBoard(){
 }
 function cardHtml(t){
   const rw = (t.reworks||[]).length; const ex = OPEN.includes(t.status) ? execOf(t) : null;
-  const wait = t.status==="待评审" ? "等待 "+dur(Date.now()-new Date(lastEntered(t,"待评审")||t.updatedAt||t.createdAt)) : t.status==="执行中" && t.startedAt ? "已运行 "+dur(Date.now()-new Date(t.startedAt)) : ago(t.updatedAt||t.createdAt);
+  const wait = t.status==="待评审" ? "等待 "+dur(Date.now()-new Date(lastEntered(t,"待评审")||t.updatedAt||t.createdAt)) : t.status==="执行中" && t.startedAt ? "有效执行 "+dur(activeTaskMs(t)) : ago(t.updatedAt||t.createdAt);
   return '<button class="card'+(t.status==="需介入"||hot(ex)?" hot":warm(ex)?" warm":"")+'" data-act="open" data-id="'+esc(t.id)+'">'+
     '<span class="id">'+esc(t.id)+' '+sampleBadge(t)+'</span><span class="t">'+esc(t.title||"(未命名)")+'</span>'+
     '<span class="m">'+rkPill(t.risk)+'<span>'+esc(t.agent||"未指定")+'</span>'+(t.project?'<span>'+esc(t.project)+'</span>':'')+'</span>'+
@@ -630,6 +634,8 @@ const RECEIPT_TEMPLATE = [
 "task: <任务编号，如 T260922-a1b>",
 "status: done | blocked",
 "summary: <一句话说明做了什么>",
+"version: <实际 Git 提交号或文档/实验版本>",
+"run: <当前执行编号，未知留空>",
 "changed:",
 "  - <改动的文件路径>",
 "verify:",
@@ -665,6 +671,7 @@ function parseReceipt(raw){
     verify,
     scope: typeof out.scope==="string" ? out.scope : "",
     risks: typeof out.risks==="string" ? out.risks : "",
+    version: typeof out.version==="string" ? out.version : "", run: typeof out.run==="string" ? out.run : "",
     session: typeof out.session==="string" ? out.session : "",
     cost: num(out.cost), minutes: num(out.minutes), ciRounds: num(out.ci_rounds), lines: num(out.lines)
   };
@@ -848,29 +855,92 @@ function fld(id, f, label, val, type, ph){
   return '<label class="f"><span>'+label+'</span><input type="'+(type||"text")+'" id="'+id+'" data-f="'+f+'" value="'+esc(val==null?"":val)+'"'+(ph?' placeholder="'+esc(ph)+'"':'')+(type==="number"?' step="any" min="0"':'')+'></label>';
 }
 function linkOut(v){ const u = safeUrl(v); return u ? ' <a href="'+esc(u)+'" target="_blank" rel="noopener noreferrer" class="small">打开</a>' : ""; }
+async function loadDelivery(id, revision=S.deliverySelection.get(id)||""){
+  const request=(S.deliveryRequests.get(id)||0)+1; S.deliveryRequests.set(id,request);
+  try { const v=await hub.req("GET","/api/tasks/"+encodeURIComponent(id)+"/delivery"+(revision?"/"+encodeURIComponent(revision):""));
+    if(S.deliveryRequests.get(id)===request && v.task===id) { S.delivery.set(id,v); if(S.openId===id) S.deliveryError=""; }
+    return v;
+  } catch(e){ if(S.openId===id && S.deliveryRequests.get(id)===request) S.deliveryError=e.message; throw e; }
+  finally { if(S.openId===id) scheduleRender(); }
+}
+function deliverySection(t){
+  return '<div class="sec"><h4>交付与验收</h4>'+window.renderDelivery(S.delivery.get(t.id))+
+    (S.deliveryError?'<p class="bad" role="alert">'+esc(S.deliveryError)+'</p>':'')+
+    '<button class="btn ghost sm" data-act="delivery-refresh">读取当前版本</button><details class="more" id="paste-receipt"><summary>提交新回执</summary><div class="form"><textarea id="d-receipt" class="code" placeholder="agent-receipt 回执，包含 version">'+esc(S.receiptDraft[t.id]||'')+'</textarea><button class="btn sm" data-act="d-receipt"'+(S.receiptBusy?' disabled':'')+'>保存成果版本</button></div></details></div>';
+}
+function captureReviewDraft(el){
+  const d=S.reviewDraft; if(!d||d.task!==S.openId) return;
+  if(el.id==='rv-note') d.note=el.value;
+  if(el.id==='rv-drop') d.dropReason=el.value;
+  if(el.id==='rv-rule') d.wantRule=el.checked;
+  if(el.id==='rv-target') d.target=el.value;
+  if(el.id==='rv-verified') d.verificationConfirmed=el.checked;
+  if(el.dataset.reviewCriterion!==undefined){ const i=Number(el.dataset.reviewCriterion); d.acceptedCriteria=el.checked?[...new Set([...d.acceptedCriteria,i])]:d.acceptedCriteria.filter(x=>x!==i); }
+}
+async function beginReview(mode, keep){
+  const id=S.openId; if(!id||S.reviewBusy) return;
+  try {
+    if(!(await taskEdits.flush(id))||taskEdits.status().count) throw new Error('请先保存任务修改');
+    S.deliverySelection.delete(id); const v=await loadDelivery(id,""); if(S.openId!==id) return;
+    S.reviewDraft={task:id,mode,view:v,expectedDeliveryId:v.currentId,expectedFingerprint:v.expectedFingerprint,acceptedCriteria:[],verificationConfirmed:false,note:keep?.note||'',reasons:keep?.reasons||[],wantRule:keep?.wantRule||false,target:keep?.target||'AGENTS.md',dropReason:'需求取消',error:''};
+    S.reviewMode=mode; S.reviewSel=S.reviewDraft.reasons;
+  } catch(e){ toast(e.message); }
+  render();
+}
 function reviewPanel(t){
-  const mode = S.reviewMode; const sel = S.reviewSel || [];
-  const chips = '<div class="chips">'+REASONS.map(r=>'<button class="chip" data-act="rv-chip" data-r="'+esc(r)+'" aria-pressed="'+sel.includes(r)+'">'+esc(r)+'</button>').join("")+'</div>';
-  const ruleBox = '<label class="small"><input type="checkbox" id="rv-rule"> 把备注沉淀为一条规则</label><label class="f"><span>规则写入位置</span><select id="rv-target">'+TARGETS.map(x=>opt(x,"AGENTS.md")).join("")+'</select></label>';
-  if (mode==="merge"){
-    const clean = !(t.reworks||[]).length;
-    return '<div class="review"><strong>评审通过并合并</strong>'+
-      '<div class="small">'+(clean?'这次没有退回记录，将计为<b>一次通过</b>。':'此前退回过 '+(t.reworks||[]).length+' 次，不计为一次通过。')+'</div>'+
-      '<div class="f"><span class="small">合并时仍发现的问题（可不选）</span>'+chips+'</div>'+
-      '<label class="f"><span>评审备注</span><textarea id="rv-note" placeholder="值得记住的做法或问题"></textarea></label>'+ruleBox+
-      '<div class="btns"><button class="btn pri" data-act="rv-confirm">确认合并</button><button class="btn ghost" data-act="rv-cancel">取消</button></div></div>';
+  const d=S.reviewDraft; if(!d||d.task!==t.id) return '';
+  const v=d.view, mode=d.mode, busy=S.reviewBusy?' disabled':'', selected=v.selected;
+  const chips='<div class="chips">'+REASONS.map(r=>'<button class="chip" data-act="rv-chip" data-r="'+esc(r)+'" aria-pressed="'+d.reasons.includes(r)+'">'+esc(r)+'</button>').join('')+'</div>';
+  let h='<div class="review" data-state-form><fieldset style="border:0;padding:0;margin:0;min-width:0"'+(S.reviewBusy?' disabled':'')+'><strong>'+(mode==='merge'?'验收当前成果（Hub 记为已合并）':mode==='rework'?'退回当前成果':'放弃任务')+'</strong>';
+  if(selected&&mode!=='drop') h+='<p class="small">本次绑定：'+esc(selected.version||'未标明版本')+' · '+esc(selected.id)+'</p>';
+  if(mode==='merge'&&selected){
+    h+=v.blockers.map(x=>'<p class="bad small">'+esc(x)+'</p>').join('')+v.warnings.map(x=>'<p class="hint">'+esc(x)+'</p>').join('');
+    h+='<ul class="checks">'+(selected.requirements?.acceptance||[]).map((text,i)=>'<li><input type="checkbox" id="rv-criterion-'+i+'" data-review-criterion="'+i+'"'+(d.acceptedCriteria.includes(i)?' checked':'')+'><label for="rv-criterion-'+i+'">'+esc(text)+'</label></li>').join('')+'</ul>'+
+      '<label class="small"><input type="checkbox" id="rv-verified"'+(d.verificationConfirmed?' checked':'')+'> 我已核对这版成果及验证依据</label><p class="hint">进度勾选不会自动成为验收确认；此操作不执行 Git 合并或部署。</p>';
   }
-  if (mode==="rework"){
-    return '<div class="review"><strong>退回修改</strong><div class="f"><span class="small">退回原因（至少选一项）</span>'+chips+'</div>'+
-      '<label class="f"><span>具体说明</span><textarea id="rv-note" placeholder="哪里不对，希望怎么改"></textarea></label>'+ruleBox+
-      '<div class="btns"><button class="btn pri" data-act="rv-confirm">确认退回</button><button class="btn ghost" data-act="rv-cancel">取消</button></div></div>';
+  if(mode==='drop') h+='<label class="f"><span>放弃原因</span><select id="rv-drop">'+REASONS.concat(['需求取消','改为人工完成']).map(r=>opt(r,d.dropReason)).join('')+'</select></label>';
+  else h+='<div class="f"><span>问题原因'+(mode==='rework'?'（至少一项）':'（可选）')+'</span>'+chips+'</div>';
+  h+='<label class="f"><span>评审备注</span><textarea id="rv-note">'+esc(d.note)+'</textarea></label>';
+  if(mode!=='drop') h+='<label class="small"><input type="checkbox" id="rv-rule"'+(d.wantRule?' checked':'')+'> 把备注沉淀为规则</label><select id="rv-target">'+TARGETS.map(x=>opt(x,d.target)).join('')+'</select>';
+  const stale=v.expectedFingerprint!==S.delivery.get(t.id)?.expectedFingerprint;
+  if(stale) h+='<p class="bad">成果或依据已变化。请重新读取并核对，备注会保留，验收勾选需重新确认。</p>';
+  if(d.error) h+='<p class="bad" role="alert">'+esc(d.error)+'</p>';
+  return h+'<div class="btns"><button class="btn pri" data-act="rv-confirm"'+(S.reviewBusy||stale||(mode==='merge'&&selected&&!v.canReview)?' disabled':'')+'>'+(mode==='merge'?'确认验收':mode==='rework'?'确认退回':'确认放弃')+'</button><button class="btn" data-act="review-reload"'+busy+'>重新读取并核对</button><button class="btn ghost" data-act="rv-cancel"'+busy+'>取消</button></div></fieldset></div>';
+}
+function activeTaskMs(t){
+  const c=t.workClock; if(!c) return null;
+  const start=Date.parse(c.runningSince||"");
+  return Math.max(0,Number(c.activeMs)||0)+(t.status==="执行中"&&Number.isFinite(start)?Math.max(0,Date.now()-start):0);
+}
+async function loadTaskLifecycle(id){
+  try { const v=await hub.req("GET","/api/tasks/"+encodeURIComponent(id)+"/lifecycle"); if(v.id===id) S.lifecycle.set(id,v); }
+  catch(e) { if(S.openId===id) S.lifecycleError=e.message; }
+  if(S.openId===id) scheduleRender();
+}
+function capturePauseDraft(el){
+  if(el.dataset.pause && S.pauseDraft && S.pauseDraft.task===S.openId) S.pauseDraft[el.dataset.pause]=el.value;
+}
+function lifecycleSection(t){
+  const v=S.lifecycle.get(t.id), p=t.pauseState, d=S.pauseDraft?.task===t.id?S.pauseDraft:null;
+  const parents=S.tasks.filter(x=>x.status==="已暂停" && x.pauseState?.interruptedBy===t.id);
+  const time=activeTaskMs(t), disabled=S.lifecycleBusy?' disabled':'';
+  let h='<div class="sec"><h4>工作断点</h4><p class="hint">有效执行 '+(time==null?'尚未记录':dur(time))+(t.workClock?.partial?'（仅从开始记录起统计）':'')+' · 暂停、待执行、阻塞和评审等待不计入；不是 Agent 进程用时。</p>';
+  if(p){
+    const other=getTask(p.interruptedBy);
+    h+='<div class="small"><strong>'+(t.status==="已暂停"?'当前暂停':'上次断点')+'</strong> · '+esc(p.reason)+'<p>'+esc(p.summary)+'</p><p>恢复第一步：'+esc(p.nextAction)+'</p>'+
+      (p.interruptedBy?'<p>临时插单：'+(other?'<button class="btn ghost sm" data-act="open" data-id="'+esc(other.id)+'">'+esc(other.title)+' · '+esc(other.status)+'</button>':esc(p.interruptedBy)+'（已不存在）')+'</p>':'')+'</div>';
   }
-  if (mode==="drop"){
-    return '<div class="review"><strong>放弃任务</strong><label class="f"><span>主要原因</span><select id="rv-drop">'+REASONS.concat(["需求取消","改为人工完成"]).map(r=>opt(r,"")).join("")+'</select></label>'+
-      '<label class="f"><span>说明</span><textarea id="rv-note"></textarea></label>'+
-      '<div class="btns"><button class="btn bad" data-act="rv-confirm">确认放弃</button><button class="btn ghost" data-act="rv-cancel">取消</button></div></div>';
-  }
-  return "";
+  if(t.status==="已暂停") h+='<p class="hint">'+esc(v?.execution?.message||'正在读取停止情况…')+'</p>'+
+    (v?.execution?.manual?.length?'<label class="small"><input id="pause-external-stopped" type="checkbox"> 我已在原会话或机器停止 Agent</label>':'')+
+    '<div class="btns"><button class="btn pri sm" data-act="task-resume"'+(S.lifecycleBusy||!v?.execution||v.execution.pending.length?' disabled':'')+'>恢复到待执行</button><button class="btn sm" data-act="lifecycle-refresh">刷新停止情况</button></div>';
+  if(d) h+='<div class="form"><label class="f"><span>暂停原因</span><input id="pause-reason" data-pause="reason" maxlength="200" value="'+esc(d.reason)+'"></label>'+
+    '<label class="f"><span>当前结论</span><textarea id="pause-summary" data-pause="summary" maxlength="280">'+esc(d.summary)+'</textarea></label>'+
+    '<label class="f"><span>恢复后的第一步</span><textarea id="pause-next" data-pause="nextAction" maxlength="200">'+esc(d.nextAction)+'</textarea></label>'+
+    '<label class="f"><span>临时插单（可选，先单独建任务）</span><select id="pause-interruption" data-pause="interruptedBy">'+opt('',d.interruptedBy,'无插单')+S.tasks.filter(x=>x.id!==t.id&&!['已合并','已放弃'].includes(x.status)).map(x=>opt(x.id,d.interruptedBy,x.title+' · '+x.id)).join('')+'</select></label>'+
+    '<p class="hint">保存后暂停计时并请求执行端停止。外部会话需手动停止；分支和工作区保留。</p><div class="btns"><button class="btn pri sm" data-act="pause-save"'+disabled+'>保存并暂停</button><button class="btn sm" data-act="pause-close"'+disabled+'>取消</button></div></div>';
+  if(parents.length) h+='<p class="small">插单处理后可返回：</p>'+parents.map(x=>'<p><button class="btn sm" data-act="open" data-id="'+esc(x.id)+'">'+esc(x.title)+'</button> '+esc(x.pauseState.nextAction)+'</p>').join('');
+  if(S.lifecycleError) h+='<p class="bad" role="alert">'+esc(S.lifecycleError)+'</p>';
+  return h+'</div>';
 }
 function drawerHtml(t){
   const nexts = (NEXT[t.status]||[]).map(([to,l]) => '<button class="btn sm'+(to==="__merge"||to==="待评审"||to==="执行中"&&t.status!=="需介入"||to==="待执行"?" pri":"")+'" data-act="move" data-to="'+esc(to)+'">'+esc(l)+'</button>').join("");
@@ -880,18 +950,20 @@ function drawerHtml(t){
   return '<div class="backdrop" data-act="close"></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="任务详情">'+
   '<div class="dh"><div class="top"><span class="mono small muted">'+esc(t.id)+' '+sampleBadge(t)+'</span><button class="btn ghost" id="d-close" data-act="close" aria-label="关闭（Esc）">关闭</button></div>'+
     '<input type="text" class="title" id="d-title" data-f="title" value="'+esc(t.title||"")+'" aria-label="标题">'+
-    '<div class="btns">'+stPill(t.status)+rkPill(t.risk)+nexts+'</div></div>'+
+    '<div class="btns">'+stPill(t.status)+rkPill(t.risk)+nexts+(['待执行','执行中','需介入'].includes(t.status)?'<button class="btn sm" data-act="pause-open">保存断点并暂停</button>':'')+'</div></div>'+
   '<div class="db" data-keep-scroll="drawer">'+
     (S.reviewMode ? reviewPanel(t) : "")+
+    lifecycleSection(t)+
     execSection(t)+
     focusUI.drawer(t.id)+
+    deliverySection(t)+
     '<div class="sec"><div class="row c3">'+
       '<label class="f"><span>项目</span><select id="d-project" data-f="project">'+projectOptions(t.project||"")+'</select></label>'+
       '<label class="f"><span>Agent</span><select id="d-agent" data-f="agent">'+agentOptions(t.agent||"")+'</select></label>'+
       '<label class="f"><span>风险等级</span><select id="d-risk" data-f="risk">'+RISKS.map(r=>opt(r,t.risk)).join("")+'</select></label></div>'+
       '<div class="meta" style="margin-top:10px"><div><span>创建</span>'+fmtDate(t.createdAt)+'</div><div><span>开始执行</span>'+fmtDate(t.startedAt)+'</div><div><span>结束</span>'+fmtDate(t.doneAt)+'</div><div><span>评审等待</span>'+wait+'</div></div></div>'+
     '<div class="sec"><h4>目标</h4><textarea id="d-goal" data-f="goal">'+esc(t.goal||"")+'</textarea></div>'+
-    '<div class="sec"><h4>验收标准 <span class="muted small">'+acc.filter(a=>a.done).length+'/'+acc.length+'</span></h4><ul class="checks">'+acc.map((a,i)=>'<li><input type="checkbox" id="d-acc-'+i+'" data-act="acc-toggle" data-i="'+i+'"'+(a.done?" checked":"")+'><label for="d-acc-'+i+'">'+esc(a.text)+'</label></li>').join("")+'</ul>'+
+    '<div class="sec"><h4>验收标准（进度勾选） <span class="muted small">'+acc.filter(a=>a.done).length+'/'+acc.length+'</span></h4><ul class="checks">'+acc.map((a,i)=>'<li><input type="checkbox" id="d-acc-'+i+'" data-act="acc-toggle" data-i="'+i+'"'+(a.done?" checked":"")+'><label for="d-acc-'+i+'">'+esc(a.text)+'</label></li>').join("")+'</ul>'+
       '<div class="btns" style="margin-top:8px"><input type="text" id="d-acc-new" placeholder="新增一条验收标准" style="flex:1;min-width:160px"><button class="btn sm" data-act="acc-add">添加</button></div></div>'+
     '<div class="sec"><h4>范围与预算</h4><div class="row c3">'+fld("d-allow","allow","允许修改",t.allow)+fld("d-deny","deny","禁止修改",t.deny)+fld("d-budget","budgetMin","时长预算（分）",t.budgetMin,"number")+'</div></div>'+
     '<div class="sec"><h4>链接</h4><div class="row c2">'+
@@ -900,18 +972,10 @@ function drawerHtml(t){
       '<label class="f"><span>PR'+linkOut(t.pr)+'</span><input type="text" id="d-pr" data-f="pr" value="'+esc(t.pr||"")+'" placeholder="https://"></label>'+
       '<label class="f"><span>会话记录'+linkOut(t.session)+'</span><input type="text" id="d-session" data-f="session" value="'+esc(t.session||"")+'"></label></div></div>'+
     '<div class="sec"><h4>用量'+(t.usage?' <span class="muted small">自动汇总：'+t.usage.sessions+' 个会话 · $'+(t.usage.costUsd||0).toFixed(2)+' · '+fmtTok((t.usage.tokensIn||0)+(t.usage.tokensOut||0))+' token · 修改 '+(t.usage.edits||0)+' 次'+(t.usage.denies?' · 拦截 '+t.usage.denies+' 次':'')+(t.costManual?' · 成本为手填':'')+'</span>':'')+'</h4><div class="row c4">'+fld("d-cost","cost","成本（元）",t.cost,"number")+fld("d-minutes","minutes","耗时（分）",t.minutes,"number")+fld("d-ci","ciRounds","CI 轮次",t.ciRounds,"number")+fld("d-lines","lines","改动行数",t.lines,"number")+'</div></div>'+
-    '<div class="sec"><h4>交付回执'+(rc&&rc.at?' <span class="muted small">'+esc(fmtDate(rc.at))+'</span>':'')+'</h4>'+
-      (rc ? '<p style="margin:0 0 8px">'+esc(rc.summary||"（无摘要）")+'</p>'+
-        ((rc.verify||[]).length?'<ul class="vlist">'+rc.verify.map(v=>'<li><span class="'+(v.result==="pass"?"ok":v.result==="fail"?"bad":"muted")+'">'+(v.result==="pass"?"通过":v.result==="fail"?"失败":"未知")+'</span><code class="mono small">'+esc(v.cmd)+'</code></li>').join("")+'</ul>':'')+
-        ((rc.changed||[]).length?'<details class="more" style="margin-top:8px;border:0;padding:0"><summary class="small">改动文件 '+rc.changed.length+' 个</summary><pre class="code" style="margin-top:6px">'+esc(rc.changed.join("\n"))+'</pre></details>':'')+
-        (!scopeOk(rc.scope)?'<p class="small bad" style="margin:8px 0 0">范围声明：'+esc(rc.scope)+'</p>':'')+
-        (rc.risks&&!/^(无|none)$/i.test(rc.risks)?'<p class="small" style="margin:6px 0 0">风险：'+esc(rc.risks)+'</p>':'')
-       : '<p class="hint">还没有回执。</p>')+
-      '<details class="more" style="margin-top:10px"><summary class="small">粘贴新回执</summary><div class="form" style="margin-top:8px"><textarea id="d-receipt" class="code" placeholder="```agent-receipt …```"></textarea><div class="btns"><button class="btn sm" data-act="d-receipt">解析并写入</button></div></div></details></div>'+
     activityHtml(t)+
     '<div class="sec"><h4>评审记录</h4>'+
       ((t.reworks||[]).length||t.review ? '<ul class="vlist">'+(t.reworks||[]).map((r,i)=>'<li><span class="pill st-待评审">第 '+(i+1)+' 次退回</span><span>'+esc((r.reasons||[]).join("、"))+(r.note?"：":"")+esc(r.note||"")+' <span class="muted mono small">'+esc(fmtDate(r.at))+'</span></span></li>').join("")+
-        (t.review?'<li><span class="pill st-已合并">合并</span><span>'+(t.review.firstPass?"一次通过":"经过退回")+((t.review.reasons||[]).length?"；问题："+esc(t.review.reasons.join("、")):"")+(t.review.note?"；"+esc(t.review.note):"")+'</span></li>':'')+'</ul>' : '<p class="hint">暂无。</p>')+
+        (t.review?'<li><span class="pill st-已合并">历史验收</span><span>'+esc(t.review.version||'旧记录，未绑定版本')+' · '+(t.review.firstPass?"一次通过":"经过退回")+((t.review.reasons||[]).length?"；问题："+esc(t.review.reasons.join("、")):"")+(t.review.note?"；"+esc(t.review.note):"")+'</span></li>':'')+'</ul>' : '<p class="hint">暂无。</p>')+
       (t.dropReason?'<p class="small">放弃原因：'+esc(t.dropReason)+'</p>':'')+'</div>'+
     '<div class="sec"><h4>状态历史</h4><ul class="hist">'+(t.history||[]).slice().reverse().map(h=>'<li>'+esc(fmtDate(h.at))+'  '+esc(h.from||"—")+' → '+esc(h.to)+'</li>').join("")+'<li>'+esc(fmtDate(t.createdAt))+'  创建</li></ul></div>'+
     '<div class="sec"><div class="btns"><button class="btn" data-act="copy" data-what="brief">复制任务单</button><button class="btn" data-act="copy" data-what="task-md">复制为 Obsidian 笔记</button><button class="btn ghost bad" data-act="del-task">删除任务</button></div></div>'+
@@ -933,10 +997,11 @@ function taskToMd(t){
   ];
   const L = ["---"].concat(fm, ["---", "# "+(t.title||t.id), "",
     "> [!info] 工作台同步", "> 本笔记由 Agent 工作台导出，重新导出会覆盖。自己的想法请写在单独的笔记里，并链接 [["+t.id+"]]。", "",
-    "## 目标", t.goal||"—", "", "## 验收标准"]);
+    "## 目标", t.goal||"—", "", "## 验收标准（进度勾选，不代表逐版验收）"]);
   (t.acceptance||[]).length ? t.acceptance.forEach(a=>L.push("- ["+(a.done?"x":" ")+"] "+a.text)) : L.push("—");
   L.push("", "## 范围与预算", "- 允许修改："+(t.allow||"—"), "- 禁止修改："+(t.deny||"—"), "- 时长预算："+(t.budgetMin?t.budgetMin+" 分钟":"—"));
   const rc = t.receipt;
+  if(t.currentDelivery) L.push("", "## 成果版本", "- 当前成果编号："+t.currentDelivery, "- 成果版本："+(rc?.version||"未标明"), "- 历史版本数："+(t.deliveries||[]).length, "- 最近验收版本："+(t.review?.version||"未绑定"));
   L.push("", "## 交付回执");
   if (rc){ L.push(rc.summary||"—"); (rc.verify||[]).forEach(v=>L.push("- "+(v.result==="pass"?"通过":v.result==="fail"?"失败":"未知")+"：`"+v.cmd+"`"));
     if ((rc.changed||[]).length){ L.push("", "改动文件：", "```", ...rc.changed, "```"); }
@@ -946,6 +1011,7 @@ function taskToMd(t){
   if (t.review) L.push("- 合并（"+localDt(t.review.at)+"）："+(t.review.firstPass?"一次通过":"经过退回")+((t.review.reasons||[]).length?"；问题："+t.review.reasons.join("、"):"")+(t.review.note?" — "+t.review.note:""));
   if (t.dropReason) L.push("- 放弃："+t.dropReason+(t.dropNote?" — "+t.dropNote:""));
   if (!(t.reworks||[]).length && !t.review && !t.dropReason) L.push("—");
+  if(t.pauseState) L.push("", "## 工作断点", "- 暂停原因："+t.pauseState.reason, "- 结论："+t.pauseState.summary, "- 恢复第一步："+t.pauseState.nextAction, "- 插单："+(t.pauseState.interruptedBy||"无"));
   L.push("", "## 状态历史"); (t.history||[]).forEach(h=>L.push("- "+localDt(h.at)+" "+(h.from||"—")+" → "+h.to)); L.push("- "+localDt(t.createdAt)+" 创建");
   return L.join("\n")+"\n";
 }
@@ -1139,30 +1205,80 @@ const A = {
   "refresh-status"(){ refreshStatus(); toast("已刷新"); },
   "copy-el"(el){ const t = document.getElementById(el.dataset.target); if (t) copyText(t.textContent, "内容"); },
   close(){ closeDrawer(); },
+  async "pause-open"(){
+    const id=S.openId; if(!id||S.lifecycleBusy) return;
+    S.lifecycleError="";
+    try {
+      if(!(await taskEdits.flush(id))||taskEdits.status().count) throw new Error("请先保存任务修改");
+      const v=await hub.req("GET","/api/tasks/"+encodeURIComponent(id)+"/lifecycle"); S.lifecycle.set(id,v);
+      S.pauseDraft={task:id,expectedFingerprint:v.expectedFingerprint,reason:"",summary:v.summary.slice(0,280),nextAction:v.nextAction.slice(0,200),interruptedBy:""};
+    } catch(e){ S.lifecycleError=e.message; }
+    render();
+  },
+  "pause-close"(){ if(!S.lifecycleBusy){S.pauseDraft=null;S.lifecycleError="";render();} },
+  async "pause-save"(){
+    const d=S.pauseDraft; if(!d||d.task!==S.openId||S.lifecycleBusy) return;
+    S.lifecycleBusy=true; S.lifecycleError=""; render();
+    try {
+      const {task,...body}=d;
+      const v=await hub.req("POST","/api/tasks/"+encodeURIComponent(task)+"/pause",body);
+      S.pauseDraft=null; S.lifecycle.set(task,v);
+      const t=await hub.req("GET","/api/docs/tasks/"+encodeURIComponent(task)); localPut("tasks",task,t.data);
+      await loadTaskRuns(task); toast("断点已保存，任务已暂停");
+    } catch(e){ S.lifecycleError=e.message+"；草稿已保留。若上下文变化，请取消后重新读取并核对。"; }
+    finally {S.lifecycleBusy=false;render();}
+  },
+  async "task-resume"(){
+    const id=S.openId,v=S.lifecycle.get(id); if(!v||S.lifecycleBusy) return;
+    const body={expectedFingerprint:v.expectedFingerprint,confirmedExternalStop:checked("pause-external-stopped")};
+    S.lifecycleBusy=true; S.lifecycleError=""; render();
+    try {
+      const next=await hub.req("POST","/api/tasks/"+encodeURIComponent(id)+"/resume",body); S.lifecycle.set(id,next);
+      const t=await hub.req("GET","/api/docs/tasks/"+encodeURIComponent(id)); localPut("tasks",id,t.data);
+      await loadTaskRuns(id); toast("已恢复到待执行，读取断点后再开工");
+    } catch(e){ S.lifecycleError=e.message; await loadTaskLifecycle(id); }
+    finally {S.lifecycleBusy=false;render();}
+  },
+  "lifecycle-refresh"(){ S.lifecycleError=""; loadTaskLifecycle(S.openId); },
   move(el){
     const t = getTask(S.openId); if (!t) return; const to = el.dataset.to;
-    if (to==="__merge"){ S.reviewMode="merge"; S.reviewSel=[]; render(); return; }
-    if (to==="__rework"){ S.reviewMode="rework"; S.reviewSel=[]; render(); return; }
-    if (to==="已放弃"){ S.reviewMode="drop"; render(); return; }
+    if (to==="__merge"){ beginReview("merge"); return; }
+    if (to==="__rework"){ beginReview("rework"); return; }
+    if (to==="已放弃"){ beginReview("drop"); return; }
     moveTask(t, to).then(()=>toast("已移到「"+to+"」"));
   },
-  "rv-chip"(el){ const r = el.dataset.r; S.reviewSel = S.reviewSel||[]; S.reviewSel = S.reviewSel.includes(r) ? S.reviewSel.filter(x=>x!==r) : S.reviewSel.concat([r]); render(); },
-  "rv-cancel"(){ S.reviewMode = null; render(); },
+  async "delivery-select"(el){
+    const id=S.openId,v=S.delivery.get(id);if(!v||S.reviewBusy) return;S.reviewBusy=true;
+    try{const out=await hub.req('POST','/api/tasks/'+encodeURIComponent(id)+'/delivery/'+encodeURIComponent(el.dataset.revision)+'/select',{expectedFingerprint:v.expectedFingerprint});localPut('tasks',id,out.task);S.deliverySelection.delete(id);S.delivery.set(id,out.delivery);toast('已切换当前成果，仍需重新验收');}
+    catch(e){S.deliveryError=e.message;}finally{S.reviewBusy=false;render();}
+  },
+  "delivery-refresh"(){ S.deliverySelection.delete(S.openId); loadDelivery(S.openId,"").catch(()=>{}); },
+  "review-reload"(){ if(!S.reviewBusy&&S.reviewDraft) beginReview(S.reviewDraft.mode,S.reviewDraft); },
+  "rv-chip"(el){ const d=S.reviewDraft; if(!d||S.reviewBusy) return; const r=el.dataset.r; d.reasons=d.reasons.includes(r)?d.reasons.filter(x=>x!==r):d.reasons.concat([r]); render(); },
+  "rv-cancel"(){ if(!S.reviewBusy){ S.reviewMode=null; S.reviewDraft=null; render(); } },
   async "rv-confirm"(){
-    const t = getTask(S.openId); if (!t) return; const at = nowIso(); const note = val("rv-note").trim(); const sel = (S.reviewSel||[]).slice(); const mode = S.reviewMode;
-    const wantRule = checked("rv-rule") && note; const target = val("rv-target");
-    if (mode==="rework" && !sel.length){ toast("请至少选一个退回原因"); return; }
-    S.reviewMode = null;
-    if (mode==="merge") await moveTask(t, "已合并", {review:{at, firstPass: !(t.reworks||[]).length, reasons: sel, note}});
-    else if (mode==="rework") await moveTask(t, "执行中", {reworks: (t.reworks||[]).concat([{at, reasons: sel, note}]).slice(-30)});
-    else if (mode==="drop") await moveTask(t, "已放弃", {dropReason: val("rv-drop"), dropNote: note});
-    if (wantRule) await addRule(note, target, t.project||"全局", t.id);
-    toast(mode==="merge"?"已合并":mode==="rework"?"已退回，任务回到执行中":"已放弃"+(wantRule?"，并新增 1 条规则":""));
+    const d=S.reviewDraft; if(!d||d.task!==S.openId||S.reviewBusy) return;
+    if(d.mode==='rework'&&!d.reasons.length){ toast('请至少选一个退回原因'); return; }
+    S.reviewBusy=true; d.error=''; render();
+    try {
+      if(!(await taskEdits.flush(d.task))||taskEdits.status().count) throw new Error('请先保存任务修改');
+      const body={action:d.mode,reasons:d.reasons,note:d.note,dropReason:d.dropReason,expectedDeliveryId:d.expectedDeliveryId,expectedFingerprint:d.expectedFingerprint,verificationConfirmed:d.verificationConfirmed,acceptedCriteria:d.acceptedCriteria};
+      const out=await hub.req('POST','/api/tasks/'+encodeURIComponent(d.task)+'/review',body); localPut('tasks',d.task,out.task);
+      if(S.reviewDraft===d){S.reviewMode=null;S.reviewDraft=null;}
+      await loadDelivery(d.task).catch(()=>{});
+      if(d.wantRule&&d.note) await addRule(d.note,d.target,getTask(d.task)?.project||'全局',d.task).catch(()=>toast('评审已保存，规则写入失败'));
+      toast(d.mode==='merge'?'本版验收已保存，未执行 Git 合并或部署':d.mode==='rework'?'已退回当前版本':'已放弃');
+    } catch(e){ d.error=e.message+'；评审草稿已保留。'; await loadDelivery(d.task).catch(()=>{}); }
+    finally {S.reviewBusy=false;render();}
   },
   "acc-add"(){ const t = getTask(S.openId); const tx = val("d-acc-new").trim(); if (!t || !tx) return; document.getElementById("d-acc-new").value = ""; patchTask(t.id, {acceptance:(t.acceptance||[]).concat([{text:tx, done:false}])}); },
-  "d-receipt"(){ const t = getTask(S.openId); if (!t) return; const r = parseReceipt(val("d-receipt")); if (!r){ toast("没有识别到回执，请检查格式"); return; }
-    const {patch, to} = receiptPatch(t, r); document.getElementById("d-receipt").value = "";
-    (["待评审","已合并","已放弃"].includes(t.status) ? patchTask(t.id, patch) : moveTask(t, to, patch)).then(()=>toast("回执已写入")); },
+  async "d-receipt"(){
+    const id=S.openId; if(!id||S.receiptBusy) return; const text=S.receiptDraft[id]||val('d-receipt');
+    S.receiptBusy=true; S.deliveryError=''; render();
+    try { const out=await hub.req('POST','/api/tasks/'+encodeURIComponent(id)+'/receipt',{text}); localPut('tasks',id,out.task); delete S.receiptDraft[id]; S.deliverySelection.delete(id); await loadDelivery(id,'').catch(()=>{}); toast(out.archived?'回执已归档，未改写当前成果':'成果版本已保存'); }
+    catch(e){ S.deliveryError=e.message+'；回执草稿已保留。'; }
+    finally {S.receiptBusy=false;render();}
+  },
   "del-task"(el){ const t = getTask(S.openId); if (!t) return; armed(el, ()=>{ const id=t.id; S.openId=null; store.del("tasks", id).then(()=>toast("已删除 "+id)); }, "再点一次确认删除"); },
   copy(el){ const w = el.dataset.what; const t = getTask(S.openId);
     if (w==="receipt-template") copyText(RECEIPT_TEMPLATE, "回执格式");
@@ -1205,13 +1321,20 @@ const A = {
     try { const r = await aiReceipt(tx); S.receiptPreview = r ? {data:r, by:"claude"} : {error:"没有提取到有效内容"}; } catch(e){ S.receiptPreview = {error: sampleErr(e) || "已取消"}; }
     render(); },
   async "apply-receipt"(){
-    const rp = S.receiptPreview; if (!rp || !rp.data) return; const r = rp.data; const target = val("r-task");
-    if (target==="__new" || !getTask(target)){
-      const {patch, to} = receiptPatch({}, r); const id = newTaskId();
-      const doc = Object.assign(newTaskDoc({title: (r.summary||"来自回执的任务").slice(0,60), status: to}), patch, {startedAt: nowIso()});
-      await store.set("tasks", id, doc); toast("已新建 "+id+" 并写入回执"); S.openId = id;
-    } else { const t = getTask(target); const {patch, to} = receiptPatch(t, r); await (["待评审","已合并","已放弃"].includes(t.status) ? patchTask(t.id, patch) : moveTask(t, to, patch)); toast("回执已写入 "+t.id); S.openId = t.id; }
-    S.receiptPreview = null; const ta = document.getElementById("r-text"); if (ta) ta.value = ""; render();
+    const rp=S.receiptPreview; if(!rp?.data||S.receiptBusy) return; const r=rp.data,target=val('r-task');
+    S.receiptBusy=true; render();
+    try {
+      let id=rp.createdId||target;
+      if(target==='__new'||!getTask(id)){
+        id=rp.createdId||(rp.createdId=newTaskId());
+        let existing=null;
+        try{existing=await hub.req('GET','/api/docs/tasks/'+encodeURIComponent(id));}catch(e){if(e.status!==404)throw e;}
+        if(!existing) await store.set('tasks',id,newTaskDoc({title:(r.summary||'来自回执的任务').slice(0,60)}));
+      }
+      const out=await hub.req('POST','/api/tasks/'+encodeURIComponent(id)+'/receipt',{...r,task:id}); localPut('tasks',id,out.task);
+      S.openId=id; S.receiptPreview=null; S.deliverySelection.delete(id); await loadDelivery(id,'').catch(()=>{}); toast(out.archived?'回执已归档':'成果版本已保存');
+    } catch(e){ toast(e.message+'；回执仍保留，可重试。'); }
+    finally{S.receiptBusy=false;render();}
   },
   "clear-receipt"(){ S.receiptPreview = null; const ta = document.getElementById("r-text"); if (ta) ta.value = ""; render(); },
   "add-rule"(){ const tx = val("ru-text").trim(); if (!tx){ toast("请填写规则内容"); return; } document.getElementById("ru-text").value = ""; addRule(tx, val("ru-target"), val("ru-scope")).then(()=>toast("已加入规则库")); },
@@ -1252,7 +1375,8 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("change", e => {
   const el = e.target;
-  captureCreateDraft(el);
+  captureReviewDraft(el); capturePauseDraft(el); captureCreateDraft(el);
+  if(el.id==="delivery-choice"){S.deliverySelection.set(S.openId,el.value);loadDelivery(S.openId,el.value).catch(()=>{});return;}
   if (S.dispatch && el.name==="dp-mode"){ S.dispatch.mode = el.value; render(); return; }
   if (S.dispatch && el.id==="dp-runner"){ S.dispatch.runner = el.value; S.dispatch.agent = ""; render(); return; }
   if (S.dispatch && el.id==="dp-agent"){ S.dispatch.agent = el.value; return; }
@@ -1263,7 +1387,7 @@ document.addEventListener("change", e => {
   if (el.id==="imp-file" && el.files && el.files[0]){ importJson(el.files[0]); el.value = ""; return; }
   if (el.dataset.f && S.openId) editTaskField(el, true);
 });
-document.addEventListener("input", e => { const el = e.target; captureCreateDraft(el); if (el.dataset.f && S.openId) editTaskField(el, false); if (el.dataset.act==="filter" && el.type==="search"){ S.filter.q = el.value; render(); } });
+document.addEventListener("input", e => { const el = e.target; captureReviewDraft(el); if(el.id==="d-receipt"&&S.openId) S.receiptDraft[S.openId]=el.value; capturePauseDraft(el); captureCreateDraft(el); if (el.dataset.f && S.openId) editTaskField(el, false); if (el.dataset.act==="filter" && el.type==="search"){ S.filter.q = el.value; render(); } });
 document.addEventListener("focusout", e => { if (e.target.dataset.f && S.openId) taskEdits.flush(S.openId); });
 document.addEventListener("keydown", e => {
   if (e.key==="Escape"){ if (modalEl) closeModal(); else if (S.dispatch){ S.dispatch = null; render(); } else if (S.openId) closeDrawer(); return; }
@@ -1378,7 +1502,7 @@ function viewProjects(){
 function fmtTok(n){ n = n||0; return n>=1e6 ? (n/1e6).toFixed(1)+"M" : n>=1e3 ? Math.round(n/1e3)+"k" : String(n); }
 const AGENT_LABEL = {"claude-code":"Claude Code", codex:"Codex", cursor:"Cursor", copilot:"Copilot", kiro:"Kiro", cowork:"Cowork", "claude-ai":"Claude", gemini:"Gemini CLI", git:"git", "task-sh":"task.sh", human:"人工", mcp:"MCP", runner:"执行端", sync:"同步"};
 const agentLabel = a => AGENT_LABEL[a] || a || "";
-const KIND_LABEL = {"session.start":"开始","session.end":"结束",edit:"修改",tool:"工具",stop:"一轮",response:"回复",receipt:"回执",deny:"拦截",check:"检查",commit:"提交",merge:"合并","task.start":"开工",mcp:"MCP",note:"记录",error:"出错",prompt:"输入","spec.task":"spec",subagent:"子任务",compact:"压缩",run:"执行",progress:"进度",sync:"同步"};
+const KIND_LABEL = {"session.start":"开始","session.end":"结束",edit:"修改",tool:"工具",stop:"一轮",response:"回复",receipt:"回执",receipt_late:"旧回执",pause:"暂停",resume:"恢复",deny:"拦截",check:"检查",commit:"提交",merge:"合并","task.start":"开工",mcp:"MCP",note:"记录",error:"出错",prompt:"输入","spec.task":"spec",subagent:"子任务",compact:"压缩",run:"执行",progress:"进度",sync:"同步"};
 function kindPill(k){ const cls = k==="deny"||k==="error" ? "st-需介入" : k==="receipt"||k==="merge" ? "st-已合并" : k==="check"||k==="task.start" ? "st-待评审" : k==="session.start"||k==="run"||k==="progress" ? "st-执行中" : ""; return '<span class="pill '+cls+'">'+esc(KIND_LABEL[k]||k)+'</span>'; }
 function feedHtml(list, withTask){
   return list.length ? '<ul class="feed">'+list.map(e=>'<li><span class="tm">'+esc(fmtDate(e.at))+'</span>'+kindPill(e.kind)+'<span class="sm" title="'+esc(e.summary)+'">'+esc(agentLabel(e.agent))+' · '+(withTask&&e.task?'<a href="#" data-act="open" data-id="'+esc(e.task)+'">'+esc(e.task)+'</a> · ':'')+esc(e.summary)+'</span></li>').join("")+'</ul>' : '<div class="empty">还没有活动。</div>';
@@ -1395,13 +1519,17 @@ function activityHtml(t){
     if (a.sessions.length) h += '<div class="tbl" style="margin-bottom:8px"><table><thead><tr><th>会话</th><th>Agent</th><th>模型</th><th class="num">成本</th><th class="num">token</th><th class="num">修改</th><th class="num">拦截</th><th>最近</th></tr></thead><tbody>'+
       a.sessions.map(x=>'<tr><td class="mono small">'+esc(String(x.id).slice(0,8))+'</td><td>'+esc(agentLabel(x.agent))+'</td><td class="small">'+esc(x.model||"—")+'</td><td class="num">$'+(x.cost_usd||0).toFixed(2)+'</td><td class="num">'+fmtTok((x.tokens_in||0)+(x.tokens_out||0))+'</td><td class="num">'+(x.edits||0)+'</td><td class="num">'+(x.denies||0)+'</td><td class="small">'+esc(ago(x.last_at))+'</td></tr>').join("")+'</tbody></table></div>';
     h += feedHtml(a.events.slice(0,40), false);
+    h += a.events.filter(e=>e.kind==='receipt_late'&&e.receipt).map(e=>{
+      const r=e.receipt, text=['结论：'+r.summary,'状态：'+(r.status==='blocked'?'阻塞':'交付'), '改动：',...(r.changed||[]),'验证：',...(r.verify||[]).map(v=>v.cmd+'：'+v.result),'范围：'+(r.scope||'未说明'),'风险：'+(r.risks||'未说明')].join('\n');
+      return '<details class="more archived-receipt" id="late-receipt-'+esc(e.seq)+'"><summary>查看旧执行回执 · '+esc(fmtDate(e.at))+'</summary><p class="hint">已归档，不代表当前执行的成果或验收结果。</p><pre class="code">'+esc(text)+'</pre></details>';
+    }).join('');
   }
   return h + '</div>';
 }
 async function loadActivity(id){
   if (!window.hub) return;
   if (!S.hub.activity[id]) S.hub.activity[id] = {events:[], sessions:[], loading:true};
-  try { const r = await hub.req("GET", "/api/tasks/"+encodeURIComponent(id)+"/activity?limit=60"); S.hub.activity[id] = {events:r.events||[], sessions:r.sessions||[]}; }
+  try { const r = await hub.req("GET", "/api/tasks/"+encodeURIComponent(id)+"/activity?limit=60&includeReceipts=1"); S.hub.activity[id] = {events:r.events||[], sessions:r.sessions||[]}; }
   catch(e){ S.hub.activity[id] = {events:[], sessions:[]}; }
   if (S.openId===id) scheduleRender();
 }
@@ -1461,7 +1589,7 @@ function viewAgents(){
 
 /* ---------- 执行管理：执行端、执行记录、派发 ---------- */
 const RUN_ACTIVE = ["queued","claimed","ready","running"];
-const RUN_LABEL = {queued:"排队中",claimed:"已领取",ready:"待启动",running:"执行中",blocked:"阻塞",done:"已交付",failed:"失败",cancelled:"已取消",lost:"失联",superseded:"已替代",stalled:"停滞",waiting:"等待执行端"};
+const RUN_LABEL = {queued:"排队中",claimed:"已领取",ready:"待启动",running:"执行中",stopping:"等待停止确认",blocked:"阻塞",done:"已交付",failed:"失败",cancelled:"已取消",lost:"失联",superseded:"已替代",stalled:"停滞",waiting:"等待执行端"};
 const MODE_LABEL = {exec:"自动执行",prepare:"准备工作区",handoff:"交给 Agent",manual:"手动开工"};
 const DISPATCH_MODES = [["exec","自动执行","执行端领取后建好工作区，无人值守启动 Agent"],["prepare","准备工作区","执行端建好分支和 worktree，由你启动 Agent"],["handoff","交给云端 Agent","生成开工提示词，粘贴到 Claude Code 网页版、Codex 云端或 Copilot"]];
 const ICON = {
@@ -1476,6 +1604,7 @@ function runnerOnline(r){ return !!(r && r.lastSeen && Date.now()-Date.parse(r.l
 function runHealth(run, live){
   if (!run) return "";
   if (!isActive(run)) return run.status;
+  if (run.cancel) return "stopping";
   const rn = live && run.runner ? S.exec.runners.get(run.runner) : null;
   if (run.status==="queued") return live && run.runner && !runnerOnline(rn) ? "waiting" : "queued";
   if (live && run.mode==="exec" && run.runner && !runnerOnline(rn)) return "lost";
@@ -1517,12 +1646,14 @@ async function loadExec(){
   scheduleRender();
 }
 async function loadTaskRuns(id){
+  loadTaskLifecycle(id); loadDelivery(id).catch(()=>{});
   if (!window.hub) return;
   try { (await hub.req("GET", "/api/runs?task="+encodeURIComponent(id)+"&limit=30")).forEach(r=>S.exec.runs.set(r.id, r)); if (S.openId===id) scheduleRender(); } catch(e){}
 }
 function onRun(run){
   if (!run || !run.id) return;
   S.exec.runs.set(run.id, run);
+  if (S.openId===run.task) loadTaskLifecycle(run.task);
   if (S.exec.runs.size > 400){ [...S.exec.runs.values()].filter(x=>!isActive(x)).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))).slice(0, S.exec.runs.size-300).forEach(x=>S.exec.runs.delete(x.id)); }
   scheduleRender();
 }
@@ -1594,7 +1725,7 @@ function viewExec(){
           '<div>3. Agent 运行 <code>bash scripts/agent/task.sh attach &lt;任务编号&gt;</code> 接手：这里会显示“云端”执行，钩子事件就是心跳。</div></div></details></div>'+
     '</div></div></div>';
 }
-const canDispatch = t => !["待评审","已合并","已放弃"].includes(t.status);
+const canDispatch = t => !["已暂停","待评审","已合并","已放弃"].includes(t.status);
 function execSection(t){
   const r = execOf(t); const d = S.dispatch && S.dispatch.task===t.id ? S.dispatch : null;
   const hist = [...S.exec.runs.values()].filter(x=>x.task===t.id).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))).map(x=>liveRun(x.id));
@@ -1711,7 +1842,7 @@ async function init(){
   S.cap.downloads = dl; S.cap.sample = sm;
   if (!db){ S.mode = "local"; render(); return; }
   S.cap.db = db; S.mode = "db";
-  db.collection("tasks").onSnapshot(s => { S.tasks = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.tasks = true; focusUI.invalidate(); scheduleRender(); }, subErr);
+  db.collection("tasks").onSnapshot(s => { S.tasks = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.tasks = true; focusUI.invalidate(); if(S.openId) loadDelivery(S.openId).catch(()=>{}); scheduleRender(); }, subErr);
   db.collection("rules").onSnapshot(s => { S.rules = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.rules = true; scheduleRender(); }, subErr);
   db.collection("retros").onSnapshot(s => { const o = {}; s.docs.forEach(d=>{ o[d.id] = Object.assign({}, d.data(), {id:d.id}); }); S.retros = o; S.loaded.retros = true; scheduleRender(); }, subErr);
   db.doc("config/main").onSnapshot(d => { if (d.exists) S.config = normalizeConfig(d.data()); S.loaded.config = true; scheduleRender(); }, subErr);

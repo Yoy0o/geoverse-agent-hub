@@ -1,6 +1,7 @@
 // Task-level work context. The same service powers REST, MCP and the daily view.
 import crypto from "node:crypto";
 import { z } from "zod";
+import { currentDelivery, deliveryContext } from "./delivery.js";
 
 const short = (max) => z.string().trim().max(max);
 const link = z.string().trim().max(2000).refine((s) => {
@@ -15,9 +16,9 @@ export const briefShape = {
 export const briefSchema = z.object(briefShape).strict().refine((v) => !v.recommendation || v.decision, "推荐动作需要对应一个待决策问题");
 export const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const CLOSED = ["已合并", "已放弃"];
-const NEXT = { "待规格": "补齐目标与验收条件", "待执行": "确认输入后开始执行", "执行中": "继续执行，阶段完成时提交结果", "需介入": "处理阻塞后继续", "待评审": "查看交付证据并评审", "已合并": "按需复用已完成成果", "已放弃": "保留结束原因" };
+const NEXT = { "待规格": "补齐目标与验收条件", "待执行": "确认输入后开始执行", "执行中": "继续执行，阶段完成时提交结果", "已暂停": "读取断点并恢复后再开工", "需介入": "处理阻塞后继续", "待评审": "查看交付证据并评审", "已合并": "按需复用已完成成果", "已放弃": "保留结束原因" };
 const RELATIONS = { reuses: "复用", extends: "补充", supersedes: "替代", impacts: "影响" };
-const FIELDS = { title: "任务名称", project: "所属项目", status: "任务状态", summary: "当前结论", nextAction: "下一步", decision: "待决策问题", recommendation: "推荐动作", risk: "风险与未决项", relations: "关联工作", evidence: "成果依据", requirements: "目标与验收范围", delivery: "交付回执", checks: "验证结果" };
+const FIELDS = { title: "任务名称", project: "所属项目", status: "任务状态", summary: "当前结论", nextAction: "下一步", decision: "待决策问题", recommendation: "推荐动作", risk: "风险与未决项", relations: "关联工作", evidence: "成果依据", requirements: "目标与验收范围", delivery: "交付回执", checks: "验证结果", checkpoint: "暂停断点 / 插单状态" };
 const plain = (v) => typeof v === "string" ? v : "";
 const concise = (v) => { const s = plain(v).replace(/\s+/g, " ").trim(); return s.length > 280 ? s.slice(0, 279) + "…" : s; };
 const arr = (v) => Array.isArray(v) ? v : [];
@@ -37,13 +38,16 @@ function contentOf(t) {
 
 // No dates, heartbeats, usage counters or run percentages: these do not change a decision.
 export function focusSnapshot(task, getTask) {
-  const b = contentOf(task), receipt = task.receipt || {}, check = task.lastCheck || {};
+  const b = contentOf(task), receipt = task.receipt || {}, revision = currentDelivery(task), delivery = revision && !revision.legacy ? deliveryContext(task) : null;
+  const check = delivery ? delivery.check || {} : task.lastCheck || {};
   const risks = [...new Set([meaningful(b.risk), meaningful(receipt.risks), meaningful(receipt.scope)].filter(Boolean))];
   return {
     title: plain(task.title), project: plain(task.project), status: plain(task.status),
     summary: b.summary || concise(receipt.summary) || concise(task.goal) || "尚未记录当前结论",
     nextAction: b.nextAction || NEXT[task.status] || "查看任务详情", decision: b.decision, recommendation: b.recommendation,
     risk: risks.join("；"),
+    ...(task.pauseState ? { checkpoint: { reason: task.pauseState.reason, summary: task.pauseState.summary, nextAction: task.pauseState.nextAction, at: task.pauseState.at, resumedAt: task.pauseState.resumedAt || null,
+      interruption: task.pauseState.interruptedBy ? (() => { const t = getTask(task.pauseState.interruptedBy); return { id: task.pauseState.interruptedBy, title: t?.title || "任务已不存在", status: t?.status || "missing" }; })() : null } } : {}),
     relations: b.relations.map((r) => {
       const related = getTask(r.taskId);
       return { ...r, label: RELATIONS[r.type], title: related ? plain(related.title) : "任务已不存在", status: related ? plain(related.status) : "missing" };
@@ -51,7 +55,8 @@ export function focusSnapshot(task, getTask) {
     evidence: b.evidence,
     requirements: { goal: plain(task.goal), allow: plain(task.allow), deny: plain(task.deny), specFingerprint: hash(plain(task.spec)),
       acceptance: arr(task.acceptance).map((a) => ({ text: plain(a?.text), done: a?.done === true })) },
-    delivery: { summary: plain(receipt.summary), changed: arr(receipt.changed).map(String), version: plain(task.mergeCommit), pr: plain(task.pr),
+    delivery: { summary: plain(receipt.summary), changed: arr(receipt.changed).map(String), version: plain(receipt.version || task.mergeCommit), pr: plain(task.pr),
+      ...(delivery ? { revisionId: revision.id, accepted: delivery.accepted, blockers: delivery.blockers, archivedCount: delivery.archivedCount } : {}),
       verify: arr(receipt.verify).map((v) => ({ cmd: plain(v?.cmd), result: plain(v?.result) || "unknown" })) },
     checks: { ok: typeof check.ok === "boolean" ? check.ok : null, outOfScope: arr(check.outOfScope).map(String),
       verify: arr(check.verify).map((v) => ({ cmd: plain(v?.cmd), result: plain(v?.result) || "unknown" })) },
@@ -75,7 +80,7 @@ export function createFocusService(store, attention = () => []) {
       content: contentOf(task), unread, firstRead: !seen, changes: unread ? focusChanges(seen?.snapshot, snapshot) : [],
       readAt: seen?.at || null, needsDecision: !!snapshot.decision && !decisionResolved, decisionResolved,
       resolution: resolution || null, resolutionStale: !!resolution && resolution.fingerprint !== fingerprint,
-      reason: failedChecks(snapshot) ? "验证未通过" : reason?.level || (snapshot.risk ? "风险待确认" : null), updatedAt: task.focus?.updatedAt || task.updatedAt || task.createdAt || "" };
+      reason: failedChecks(snapshot) ? "验证未通过" : reason?.level || (snapshot.risk ? "风险待确认" : task.status === "已暂停" && CLOSED.includes(snapshot.checkpoint?.interruption?.status) ? "插单已结束，可恢复" : task.status === "已暂停" && snapshot.checkpoint?.interruption?.status === "missing" ? "插单已不存在，请核对" : null), updatedAt: task.focus?.updatedAt || task.updatedAt || task.createdAt || "" };
   }
   function get(id) {
     const t = requireTask(id);
@@ -141,8 +146,13 @@ export function createFocusService(store, attention = () => []) {
   }
   function context(id) {
     const v = get(id), s = v.snapshot;
+    const parents = store.listDocs("tasks").filter(d => d.data.status === "已暂停" && d.data.pauseState?.interruptedBy === id);
     return { ...v, expectedFingerprint: v.fingerprint, brief: [
       `# 工作上下文：${s.title}`, `任务：${id}`, `状态：${s.status}`, `当前结论：${s.summary}`, `下一步：${s.nextAction}`,
+      s.status === "已暂停" ? "任务已暂停：禁止自动开工。先核对 Agent 停止情况，再显式恢复到待执行。" : "",
+      s.checkpoint ? `暂停断点：${s.checkpoint.reason}；当时结论：${s.checkpoint.summary}；恢复第一步：${s.checkpoint.nextAction}` : "",
+      s.checkpoint?.interruption ? `插单：${s.checkpoint.interruption.id} · ${s.checkpoint.interruption.title} · ${s.checkpoint.interruption.status}` : "",
+      ...parents.map(d => `插单结束后可返回：${d.id} · ${d.data.title}；恢复第一步：${d.data.pauseState.nextAction}`),
       s.decision ? `待决策：${s.decision}（${v.decisionResolved ? "已采纳当前建议" : "未解决"}）` : "",
       s.recommendation ? `推荐动作：${s.recommendation}` : "", s.risk ? `风险与未决项：${s.risk}` : "",
       ...s.relations.map((r) => `关联：${r.label} ${r.taskId} · ${r.title} · ${r.status}；${r.note}`),
