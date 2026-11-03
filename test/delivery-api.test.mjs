@@ -43,6 +43,50 @@ const delivery = (id, revision='') => call('/api/tasks/'+id+'/delivery'+(revisio
 const receipt = (id, extra={}) => call('/api/tasks/'+id+'/receipt','POST',{status:'done',summary:'Topology repaired',version:'experiment-v1',changed:['src/routes.js'],verify:[{cmd:'route tests',result:'pass'}],scope:'ok',risks:'无',...extra}).then(json);
 const reviewBody = async id => { const v=await delivery(id); return {action:'merge',expectedDeliveryId:v.currentId,expectedFingerprint:v.expectedFingerprint,verificationConfirmed:true,acceptedCriteria:(v.selected.requirements?.acceptance||[]).map((_,i)=>i),note:'已人工核对实验和验收用例'}; };
 
+test('attention, search and pinned reuse share REST authentication and survive backup restore',async()=>{
+  for(const route of ['/api/deliveries','/api/focus/read']) assert.equal((await fetch(base+route,{method:route.endsWith('/read')?'POST':'GET'})).status,401);
+  const source=await create('Reusable navigation outcome'),target=await create('New navigation requirements');
+  const d=await receipt(source); await json(await call('/api/tasks/'+source+'/review','POST',await reviewBody(source)));
+  const results=await json(await call('/api/deliveries?q='+encodeURIComponent('Reusable navigation')));
+  assert.equal(results.items[0].deliveryId,d.deliveryId);assert.equal(results.items[0].accepted,true);
+  assert.equal((await call('/api/deliveries?limit=500')).status,400);
+  const focus=()=>call('/api/tasks/'+target+'/focus').then(json);
+  const original=await focus();
+  await json(await call('/api/tasks/'+target+'/focus/defer','POST',{expectedFingerprint:original.fingerprint,minutes:60}));
+  assert((await json(await call('/api/focus'))).deferred.some(v=>v.id===target));
+  assert.equal((await focus()).unread,true);
+  const sourceContext=await delivery(source);
+  const input={expectedFingerprint:original.fingerprint,sourceTaskId:source,deliveryId:d.deliveryId,expectedSourceFingerprint:sourceContext.expectedFingerprint,note:'Reuse algorithm, validate new floor'};
+  await json(await call('/api/tasks/'+target+'/reuse','POST',input));
+  assert.equal((await focus()).deferred,false);
+  assert.equal((await call('/api/tasks/'+target+'/reuse','POST',input)).status,409);
+  const latest=await focus();
+  const result=await json(await call('/api/focus/read','POST',{items:[{id:target,expectedFingerprint:latest.fingerprint}]}));
+  assert.deepEqual(result.read,[target]);assert.equal((await task(target)).status,'执行中');
+  await json(await call('/api/tasks/'+target+'/focus/defer','POST',{expectedFingerprint:latest.fingerprint,minutes:60}));
+  const backup=await json(await call('/api/export'));await json(await call('/api/import','POST',backup));
+  assert.equal((await focus()).deferred,true);assert.equal((await focus()).unread,false);
+  assert.equal((await focus()).snapshot.relations[0].delivery.id,d.deliveryId);
+});
+
+test('MCP exposes compact search and explicit deferral and reuse without copying source approval',async()=>{
+  const source=await create('MCP reusable evidence'),target=await create('MCP target');const d=await receipt(source);
+  await json(await call('/api/tasks/'+source+'/review','POST',await reviewBody(source)));
+  const client=new Client({name:'reuse-fixture',version:'1'});
+  await client.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp?agent=codex'),{requestInit:{headers:{Authorization:'Bearer '+token}}}));
+  const run=async(name,args)=>{const r=await client.callTool({name,arguments:args});assert(!r.isError,JSON.stringify(r));return JSON.parse(r.content[0].text);};
+  try {
+    const context=await run('get_work_context',{id:target});
+    await run('defer_task_attention',{id:target,expectedFingerprint:context.expectedFingerprint,minutes:60});
+    assert((await run('get_focus',{})).deferred.some(x=>x.id===target));
+    const result=await run('search_deliveries',{q:'MCP reusable',limit:1});assert.equal(result.total,1);assert(!('receipt' in result.items[0]));
+    const v=await run('get_delivery',{id:source});
+    await run('reuse_delivery',{id:target,sourceTaskId:source,deliveryId:d.deliveryId,expectedFingerprint:context.expectedFingerprint,expectedSourceFingerprint:v.expectedFingerprint,note:'Use the experiment as evidence'});
+    assert.equal((await task(target)).deliveryReviews,undefined);assert.equal((await task(target)).status,'执行中');
+    assert.match((await run('get_work_context',{id:target})).context,/固定成果/);
+  } finally { await client.close(); }
+});
+
 test('immutable versions deduplicate across channels and retain concise changes without reverting on replay',async()=>{
   const id=await create('Versioned route experiment');
   const first=await receipt(id), firstSnapshot=(await delivery(id)).selected;

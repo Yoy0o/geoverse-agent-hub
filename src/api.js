@@ -9,6 +9,7 @@ import { createFocusService } from "./focus.js";
 import { receiveWorkBrief } from "./work-brief.js";
 import { lifecycleView, pauseTask, resumeTask } from "./lifecycle.js";
 import { DELIVERY_FIELDS, deliveryContext, deliveryHistory, recordCheck } from "./delivery.js";
+import { searchDeliveries } from "./results.js";
 import { ingest, channels } from "./ingest.js";
 import { execMeta } from "./hooks.js";
 import {
@@ -98,10 +99,14 @@ export function apiRoutes(app, auth) {
   app.post("/api/tasks/:id/pause", auth, handle(req => pauseTask(req.params.id, req.body, who(req))));
   app.post("/api/tasks/:id/resume", auth, handle(req => resumeTask(req.params.id, req.body, who(req))));
   app.get("/api/focus", auth, handle((req) => focus.list({ limit: req.query.limit })));
+  app.post("/api/focus/read", auth, handle(req => focus.markReadBatch(req.body, who(req))));
+  app.get("/api/deliveries", auth, handle(req => searchDeliveries(allTasks(), req.query)));
+  app.post("/api/tasks/:id/reuse", auth, handle(req => focus.reuse(req.params.id, req.body, who(req))));
   app.get("/api/tasks/:id/focus/context", auth, handle((req) => focus.context(req.params.id)));
   app.get("/api/tasks/:id/focus", auth, handle((req) => focus.get(req.params.id)));
   app.put("/api/tasks/:id/focus", auth, handle((req) => focus.update(req.params.id, req.body, who(req))));
   app.post("/api/tasks/:id/focus/read", auth, handle((req) => focus.markRead(req.params.id, req.body, who(req))));
+  app.post("/api/tasks/:id/focus/defer", auth, handle(req => focus.defer(req.params.id, req.body, who(req))));
   app.post("/api/tasks/:id/focus/decision", auth, handle((req) => focus.decide(req.params.id, req.body, who(req))));
   app.get("/api/tasks", auth, (req, res) => {
     let ts = allTasks();

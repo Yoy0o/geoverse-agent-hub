@@ -38,8 +38,10 @@ export function mergeTask(local, remote, localAt, remoteAt) {
   if (local.focus || remote.focus) {
     const lf = local.focus || {}, rf = remote.focus || {};
     out.focus = { ...newer(lf, rf, "updatedAt") };
-    for (const k of ["read", "decisionResolution"]) {
-      const value = lf[k] && rf[k] ? newer(lf[k], rf[k]) : lf[k] || rf[k];
+    for (const k of ["read", "decisionResolution", "deferral"]) {
+      let value = lf[k] && rf[k] ? newer(lf[k], rf[k]) : lf[k] || rf[k];
+      // Equal timestamps must not resurrect a cancelled or longer deferral on the other peer.
+      if (k === "deferral" && lf[k] && rf[k] && ts(lf[k].at) === ts(rf[k].at)) value = [lf[k], rf[k]].sort((a, b) => ts(a.until) - ts(b.until) || JSON.stringify(a).localeCompare(JSON.stringify(b)))[0];
       if (value) out.focus[k] = value;
     }
   }

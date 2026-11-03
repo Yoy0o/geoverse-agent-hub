@@ -16,7 +16,7 @@
       pending = (async () => {
         try {
           const result = await request("GET", "/api/focus");
-          const next = new Map([...result.items, ...result.remaining, ...result.updates].map((v) => [v.id, v]));
+          const next = new Map([...result.items, ...result.remaining, ...result.updates, ...(result.deferred || [])].map((v) => [v.id, v]));
           const id = currentTask();
           if (id && !next.has(id)) {
             try { next.set(id, await request("GET", url(id))); } catch (e) { if (e.status !== 404) throw e; }
@@ -34,7 +34,7 @@
     function describe(field, value) {
       if (value == null) return "尚未记录";
       if (typeof value === "string") return value || "已清除";
-      if (field === "relations") return value.map((r) => `${r.label} ${r.title}（${r.taskId} · ${r.status}）：${r.note}`).join("\n") || "无关联";
+      if (field === "relations") return value.map((r) => `${r.label} ${r.title}（${r.taskId} · ${r.status}）：${r.note}${r.delivery ? "；固定版本：" + (r.delivery.missing ? "已不存在" : r.delivery.version) : ""}`).join("\n") || "无关联";
       if (field === "evidence") return value.map((e) => `${e.label} ${e.url}${e.version ? " @ " + e.version : ""}`).join("\n") || "无链接";
       if (field === "delivery") return [value.summary, value.version && "成果版本：" + value.version, value.revisionId && (value.accepted ? "本版已验收" : "本版待核对"), value.archivedCount ? "另有 " + value.archivedCount + " 版归档成果" : "", ...(value.blockers || []), value.pr, ...(value.changed || []), ...(value.verify || []).map((v) => `${v.cmd}：${v.result}`)].filter(Boolean).join("\n") || "尚无回执";
       if (field === "checks") return [value.ok == null ? "尚未检查" : value.ok ? "上报检查通过" : "上报检查未通过", ...(value.verify || []).map((v) => `${v.cmd}：${v.result}`), ...(value.outOfScope || []).map((s) => "越界：" + s)].join("\n");
@@ -46,7 +46,7 @@
       const s = v.snapshot;
       const changes = v.firstRead ? '<p class="hint">首次阅读：下面是当前工作状态；之后只比较你明确标记已读的版本。</p>' : v.changes.length ? v.changes.map((c) => '<div class="focus-diff"><h4>' + esc(c.label) + '</h4><div class="focus-before"><span class="focus-label">上次已读</span><pre>' + esc(describe(c.field, c.before)) + '</pre></div><div><span class="focus-label">当前</span><pre>' + esc(describe(c.field, c.after)) + '</pre></div></div>').join('') : '<p class="hint">相对上次已读，没有新增变化。</p>';
       return '<details class="more focus-details" id="focus-details-' + surface + '-' + esc(v.id) + '"><summary>变化、关联与依据</summary>' + changes +
-        (s.relations.length ? '<h4>关联已有工作</h4><ul class="focus-relations">' + s.relations.map((r) => '<li><span class="pill">' + esc(r.label) + '</span> ' + (r.status === "missing" ? '<span class="bad">任务已不存在：' + esc(r.taskId) + '</span>' : '<button class="btn ghost sm" data-act="open" data-id="' + esc(r.taskId) + '">' + esc(r.title) + '</button> <span class="small muted">' + esc(r.status) + '</span>') + '<div>' + esc(r.note) + '</div></li>').join('') + '</ul>' : '') +
+        (s.relations.length ? '<h4>关联已有工作</h4><ul class="focus-relations">' + s.relations.map((r) => '<li><span class="pill">' + esc(r.label) + '</span> ' + (r.status === "missing" ? '<span class="bad">任务已不存在：' + esc(r.taskId) + '</span>' : '<button class="btn ghost sm" data-act="open" data-id="' + esc(r.taskId) + '"' + (r.deliveryId ? ' data-revision="' + esc(r.deliveryId) + '"' : '') + '>' + esc(r.title) + '</button> <span class="small muted">' + esc(r.status) + '</span>') + '<div>' + esc(r.note) + (r.delivery ? '<p class="hint">固定成果：' + esc(r.delivery.missing ? '已不存在，请核对' : r.delivery.version + ' · ' + r.delivery.summary + (r.delivery.accepted ? '（来源当前已验收）' : '（来源非当前已验收版本）')) + '</p>' : '') + '</div></li>').join('') + '</ul>' : '') +
         (s.evidence.length ? '<h4>成果依据</h4><ul>' + s.evidence.map((e) => '<li>' + (safeUrl(e.url) ? '<a href="' + esc(safeUrl(e.url)) + '" target="_blank" rel="noopener noreferrer">' + esc(e.label) + '</a>' : esc(e.label)) + (e.version ? ' · ' + esc(e.version) : '') + '</li>').join('') + '</ul>' : '') +
         '<h4>回执与检查</h4><pre class="focus-evidence">' + esc(describe('delivery', s.delivery) + '\n' + describe('checks', s.checks)) + '</pre><p class="hint">回执与链接为上报依据，按任务验收条件核查。</p>' +
         (v.resolution ? '<p class="hint">上次决定：' + (v.resolution.action === 'accept' ? '采纳建议' : '要求调整') + (v.resolution.note ? '；' + esc(v.resolution.note) : '') + (v.resolutionStale ? '（所依据的状态已变化）' : '') + '</p>' : '') + '</details>';
@@ -70,15 +70,16 @@
         '<div class="btns">' + button('save', '保存摘要', v, surface, true) + button('cancel-edit', '取消', v, surface) + '</div></div></section>';
     }
     function card(v, surface = 'today') {
-      const s = v.snapshot, hasMissing = s.relations.some((r) => r.status === 'missing');
+      const s = v.snapshot, hasMissing = s.relations.some((r) => r.status === 'missing' || r.delivery?.missing);
+      const deferred = v.deferred ? '<p class="hint">稍后处理至 ' + esc(new Date(v.deferral.until).toLocaleString()) + '；新变化会重新出现。</p>' + button('defer-cancel', '恢复今日显示', v, surface) : v.canDefer ? '<details class="more" id="focus-defer-' + surface + '-' + esc(v.id) + '"><summary>稍后处理</summary><p class="hint">只调整今日队列，保留未读和验收状态。</p>' + button('defer-hour', '1 小时后', v, surface) + ' ' + button('defer-day', '24 小时后', v, surface) + '</details>' : '';
       const risk = s.risk.length > 280 ? s.risk.slice(0, 279) + '…' : s.risk;
       const heading = surface === 'drawer' ? '<h3>当前工作摘要</h3>' : '<button class="focus-title" data-act="open" data-id="' + esc(v.id) + '">' + esc(v.title) + '</button>';
       return '<article class="focus-card' + (s.risk || hasMissing || ['需介入', '验证未通过'].includes(v.reason) ? ' focus-warning' : '') + '"><div class="focus-heading">' + heading + '<span class="pill">' + esc(v.needsDecision ? '待决策' : v.reason || s.status) + '</span></div>' +
         '<p class="focus-meta">' + esc(v.project || '未指定项目') + ' · ' + (v.unread ? v.firstRead ? '首次阅读' : '新增变化：' + esc(v.changes.map((c) => c.label).join('、')) : '没有未读变化') + '</p>' +
         line('当前结论', s.summary) + (v.needsDecision ? line('需要决定', s.decision) + line('推荐动作', s.recommendation) : line(s.status === '已暂停' ? '恢复第一步' : '下一步', s.nextAction)) +
-        line('风险 / 未决', risk, 'bad') + (risk !== s.risk ? '<details class="more focus-details" id="focus-risk-' + surface + '-' + esc(v.id) + '"><summary>查看完整风险与未决项</summary><pre>' + esc(s.risk) + '</pre></details>' : '') + (v.reason === '验证未通过' ? '<p class="bad">存在未通过的验证或范围检查，展开依据查看。</p>' : '') + (hasMissing ? '<p class="bad">关联任务已不存在，请核对引用。</p>' : '') + (v.resolutionStale && s.decision ? '<p class="bad">先前决定的依据已变化，请重新核对。</p>' : '') +
+        line('风险 / 未决', risk, 'bad') + (risk !== s.risk ? '<details class="more focus-details" id="focus-risk-' + surface + '-' + esc(v.id) + '"><summary>查看完整风险与未决项</summary><pre>' + esc(s.risk) + '</pre></details>' : '') + (v.reason === '验证未通过' ? '<p class="bad">存在未通过的验证或范围检查，展开依据查看。</p>' : '') + (hasMissing ? '<p class="bad">关联任务或固定成果已不存在，请核对引用。</p>' : '') + (v.resolutionStale && s.decision ? '<p class="bad">先前决定的依据已变化，请重新核对。</p>' : '') +
         (v.decisionResolved ? '<p class="small ok">已采纳当前建议，任务仍按原流程验收。</p>' : '') +
-        (v.resolution?.action === 'revise' ? line('调整要求', v.resolution.note) : '') + details(v, surface) +
+        (v.resolution?.action === 'revise' ? line('调整要求', v.resolution.note) : '') + details(v, surface) + deferred +
         '<div class="btns focus-actions">' + (v.needsDecision && s.recommendation ? button('accept', '采纳建议', v, surface, true) : '') + (v.needsDecision ? button('revise', '要求调整', v, surface) : '') + (v.unread ? button('read', '标记已读', v, surface) : '') + button('context', '续接上下文', v, surface) + button('edit', '编辑摘要', v, surface) + '</div>' +
         (revision?.id === v.id && revision.surface === surface ? '<div class="form focus-editor"><label class="f"><span>需要怎样调整</span><textarea id="focus-revision-' + surface + '-' + esc(v.id) + '" maxlength="500"></textarea></label><div class="btns">' + button('submit-revision', '提交调整意见', v, surface, true) + button('cancel-revision', '取消', v, surface) + '</div></div>' : '') + editorHtml(v, surface) + '</article>';
     }
@@ -87,10 +88,11 @@
       if (dirty && !pending && !timer && !error) invalidate();
       const message = error ? '<p class="bad" role="alert">' + esc(error) + '</p><button class="btn sm" data-focus-action="refresh">重试</button>' : '';
       if (!data) return '<div class="panel"><h2>今日推进</h2>' + message + (!error ? '<p class="hint">正在读取需要你处理的事项…</p>' : '') + '</div>';
-      return '<section class="focus-home"><div class="focus-heading"><div><h2>需要我判断什么</h2><p class="hint">' + data.counts.attention + ' 项待处理 · ' + data.counts.updates + ' 项普通变化</p></div><button class="btn ghost sm" data-focus-action="refresh">刷新</button></div>' + message +
+      return '<section class="focus-home"><div class="focus-heading"><div><h2>需要我判断什么</h2><p class="hint">' + data.counts.attention + ' 项待处理 · ' + data.counts.updates + ' 项普通变化 · ' + (data.counts.deferred || 0) + ' 项稍后处理</p></div><button class="btn ghost sm" data-focus-action="refresh">刷新</button></div>' + message +
         (data.items.length ? data.items.map((v) => card(v)).join('') : '<div class="panel"><p>当前没有需要你判断的事项。</p><p class="hint">普通变化在下方展开，任务执行与评审保持原流程。</p></div>') +
         (data.remaining.length ? '<details class="more" id="focus-more-actions"><summary>其余 ' + data.remaining.length + ' 项待处理</summary>' + data.remaining.map((v) => card(v)).join('') + '</details>' : '') +
-        (data.updates.length ? '<details class="more" id="focus-normal-updates"><summary>' + data.updates.length + ' 项普通变化</summary>' + data.updates.map((v) => card(v, 'updates')).join('') + '</details>' : '') +
+        (data.updates.length ? '<details class="more" id="focus-normal-updates"><summary>' + data.updates.length + ' 项普通变化</summary>' + '<button class="btn sm" data-focus-action="read-batch" data-focus-batch="' + esc(JSON.stringify(data.updates.slice(0, 50).map(v => ({id:v.id,expectedFingerprint:v.fingerprint})))) + '"' + (busy ? ' disabled' : '') + '>将这 ' + Math.min(50, data.updates.length) + ' 项普通变化标记已读</button><p class="hint">不包含待决策和紧急事项；不代表验收。超过 50 项时分批处理。</p>' + data.updates.map((v) => card(v, 'updates')).join('') + '</details>' : '') +
+        (data.deferred?.length ? '<details class="more" id="focus-deferred"><summary>稍后处理 ' + data.deferred.length + ' 项</summary>' + data.deferred.map(v => card(v, 'deferred')).join('') + '</details>' : '') +
         (!data.total ? '<p class="hint">先创建任务；已有任务会直接生成工作卡，无需迁移。</p>' : '') + '</section>';
     }
     function drawer(id) {
@@ -102,7 +104,7 @@
     function readEditor() {
       const b = {}, p = editor.prefix;
       ['summary', 'nextAction', 'decision', 'recommendation', 'risk'].forEach((k) => { b[k] = input(p, k); });
-      b.relations = Array.from({ length: editor.relationRows }, (_, i) => ({ taskId: input(p, `rel-${i}-task`), type: input(p, `rel-${i}-type`), note: input(p, `rel-${i}-note`) })).filter((r) => r.taskId || r.note);
+      b.relations = Array.from({ length: editor.relationRows }, (_, i) => ({ taskId: input(p, `rel-${i}-task`), type: input(p, `rel-${i}-type`), note: input(p, `rel-${i}-note`), ...(editor.content.relations[i]?.deliveryId && editor.content.relations[i].taskId === input(p, `rel-${i}-task`) ? { deliveryId: editor.content.relations[i].deliveryId } : {}) })).filter((r) => r.taskId || r.note);
       b.evidence = Array.from({ length: editor.evidenceRows }, (_, i) => ({ label: input(p, `ev-${i}-label`), url: input(p, `ev-${i}-url`), version: input(p, `ev-${i}-version`) })).filter((e) => e.label || e.url || e.version);
       return b;
     }
@@ -113,6 +115,13 @@
       const action = el.dataset.focusAction, id = el.dataset.focusId, surface = el.dataset.focusSurface;
       const expectedFingerprint = el.dataset.focusFingerprint, v = cache.get(id);
       if (action === 'refresh') { error = ''; dirty = true; await refresh(); return; }
+      if (action === 'read-batch') {
+        busy = true; el.disabled = true;
+        try { const result = await request('POST', '/api/focus/read', { items: JSON.parse(el.dataset.focusBatch) }); toast('已读 ' + result.read.length + ' 项' + (result.skipped.length ? '；' + result.skipped.length + ' 项已变化或需单独处理，仍保留' : '；未改变验收')); }
+        catch (e) { toast(e.message || '保存失败，未清除未读'); }
+        finally { busy = false; dirty = true; await refresh(); changed(); }
+        return;
+      }
       if (!v) { invalidate(); return; }
       if (action === 'edit') {
         editor = { id, surface, fingerprint: expectedFingerprint, prefix: 'focus-edit-' + surface + '-' + id + '-' + expectedFingerprint.slice(0, 10), content: structuredClone(v.content), relationRows: Math.min(12, v.content.relations.length + 1), evidenceRows: Math.min(12, v.content.evidence.length + 1) };
@@ -126,6 +135,7 @@
       busy = true; el.disabled = true;
       try {
         if (action === 'context') { const context = await request('GET', url(id) + '/context'); showText('续接上下文', context.brief, id + '-context.md'); }
+        else if (action.startsWith('defer-')) { await request('POST', url(id) + '/defer', { expectedFingerprint, minutes: action === 'defer-hour' ? 60 : action === 'defer-day' ? 1440 : 0 }); toast(action === 'defer-cancel' ? '已恢复今日显示' : '已安排稍后处理；执行、未读和验收状态保持原样'); }
         else if (action === 'read') { await request('POST', url(id) + '/read', { expectedFingerprint }); toast('已标记当前版本已读；未改变验收或决定'); }
         else if (action === 'accept') { await request('POST', url(id) + '/decision', { expectedFingerprint, action: 'accept' }); toast('已记录采纳；未执行或合并任务'); }
         else if (action === 'submit-revision' && revision) {
@@ -138,6 +148,6 @@
       } catch (e) { toast(e.message || '操作失败'); if (e.status === 409) dirty = true; }
       finally { busy = false; el.disabled = false; if (dirty) await refresh(); changed(); }
     });
-    return { today, drawer, invalidate };
+    return { today, drawer, invalidate, counts: () => data?.counts || null };
   };
 })();
