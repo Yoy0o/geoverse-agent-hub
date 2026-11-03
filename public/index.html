@@ -321,6 +321,34 @@ const S = {
 const AI = () => (S.hub.caps && S.hub.caps.llm && S.hub.caps.llm.provider==="anthropic") ? "Claude" : "AI";
 try { const t = localStorage.getItem("awb.tab"); if (t && TABS.some(x=>x[0]===t)) S.tab = t; } catch(e){}
 
+// URLs carry navigation only. They never change the current delivery or approve work.
+let routePending = true;
+function syncLocation(replace=false){
+  if(routePending || !S.loaded.tasks) return;
+  const url=new URL(location.href); url.searchParams.set('tab',S.tab);
+  for(const key of ['task','revision']) url.searchParams.delete(key);
+  if(S.openId){
+    url.searchParams.set('task',S.openId);
+    const revision=S.deliverySelection.get(S.openId); if(revision) url.searchParams.set('revision',revision);
+  }
+  if(url.href!==location.href) history[replace?'replaceState':'pushState'](null,'',url.href);
+}
+function applyLocation(){
+  if(!S.loaded.tasks) return;
+  const p=new URL(location.href).searchParams, tab=p.get('tab');
+  S.tab=TABS.some(t=>t[0]===tab)?tab:(tab?'today':S.tab);
+  S.openId=null; S.reviewMode=null; S.dispatch=null; S.deliveryError='';
+  const id=p.get('task'), revision=p.get('revision');
+  if(id && getTask(id)){
+    S.openId=id;
+    if(revision && revision.length<=200) S.deliverySelection.set(id,revision); else S.deliverySelection.delete(id);
+    loadActivity(id); loadTaskRuns(id);
+  } else if(id) toast('链接中的任务不存在或已删除，请从看板重新选择');
+  routePending=false; syncLocation(true);
+  if(S.tab==='agents') refreshStatus(); if(S.tab==='exec') loadExec(); if(S.tab==='export') loadSync();
+}
+window.addEventListener('popstate',()=>{routePending=true; applyLocation(); render();});
+
 /* ---------- utils ---------- */
 const $ = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
@@ -471,6 +499,7 @@ function attention(){
 /* ---------- render framework ---------- */
 let lastKey = "";
 function render(){
+  syncLocation();
   renderTabs(); renderSync(); renderBanner(); renderSaveState();
   const key = S.tab + "|" + (S.openId||"") + "|" + (S.reviewMode||"");
   const preserve = key === lastKey; lastKey = key;
@@ -858,6 +887,8 @@ function fld(id, f, label, val, type, ph){
 function linkOut(v){ const u = safeUrl(v); return u ? ' <a href="'+esc(u)+'" target="_blank" rel="noopener noreferrer" class="small">打开</a>' : ""; }
 async function loadDelivery(id, revision=S.deliverySelection.get(id)||""){
   const request=(S.deliveryRequests.get(id)||0)+1; S.deliveryRequests.set(id,request);
+  const cached=S.delivery.get(id);
+  if(cached && cached.selected?.id !== (revision||cached.currentId)) S.delivery.delete(id);
   try { const v=await hub.req("GET","/api/tasks/"+encodeURIComponent(id)+"/delivery"+(revision?"/"+encodeURIComponent(revision):""));
     if(S.deliveryRequests.get(id)===request && v.task===id) { S.delivery.set(id,v); if(S.openId===id) S.deliveryError=""; }
     return v;
@@ -1847,7 +1878,11 @@ async function init(){
   S.cap.downloads = dl; S.cap.sample = sm;
   if (!db){ S.mode = "local"; render(); return; }
   S.cap.db = db; S.mode = "db";
-  db.collection("tasks").onSnapshot(s => { S.tasks = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.tasks = true; resultsUI.invalidate(); focusUI.invalidate(); if(S.openId) loadDelivery(S.openId).catch(()=>{}); scheduleRender(); }, subErr);
+  db.collection("tasks").onSnapshot(s => { S.tasks = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.tasks = true; resultsUI.invalidate(); focusUI.invalidate();
+    if(routePending) applyLocation();
+    else if(S.openId && !getTask(S.openId)){ S.openId=null; S.reviewMode=null; toast('当前任务已删除'); }
+    else if(S.openId) loadDelivery(S.openId).catch(()=>{});
+    scheduleRender(); }, subErr);
   db.collection("rules").onSnapshot(s => { S.rules = s.docs.map(d=>Object.assign({}, d.data(), {id:d.id})); S.loaded.rules = true; scheduleRender(); }, subErr);
   db.collection("retros").onSnapshot(s => { const o = {}; s.docs.forEach(d=>{ o[d.id] = Object.assign({}, d.data(), {id:d.id}); }); S.retros = o; S.loaded.retros = true; scheduleRender(); }, subErr);
   db.doc("config/main").onSnapshot(d => { if (d.exists) S.config = normalizeConfig(d.data()); S.loaded.config = true; scheduleRender(); }, subErr);

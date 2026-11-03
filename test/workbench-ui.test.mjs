@@ -12,11 +12,12 @@ async function until(check) {
 }
 const task = (id, title) => ({ id, title, status: '待执行', risk: 'L2', goal: 'Original goal', acceptance: [], history: [], createdAt: new Date().toISOString() });
 const deferred = () => { let resolve, reject; const promise = new Promise((a,b) => { resolve=a; reject=b; }); return { promise, resolve, reject }; };
-async function workbench(t, initial = []) {
-  const dom = new JSDOM(html, { url: 'http://hub.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+async function workbench(t, initial = [], options = {}) {
+  const dom = new JSDOM(html, { url: options.url || 'http://hub.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close());
   const w = dom.window, docs = new Map(initial.map(d => [d.id, structuredClone(d)])), subscribers = new Map();
   const api = { puts: [], patches: [], briefs: [], copied: [], pauses: [], resumes: [], reviews: [], receipts: [], setGate: null, patchGate: null, failAfterPut: false, patchError: null, briefError: null, pauseError: null, pauseGate: null, pauseExecution: null };
+  if(options.delivery) api.delivery=options.delivery;
   const lifecycle = id => {
     const d=docs.get(id);
     return { id, status:d.status, expectedFingerprint:'a'.repeat(64), summary:d.goal, nextAction:'Run the next experiment', content:{}, checkpoint:d.pauseState||null,
@@ -60,6 +61,7 @@ async function workbench(t, initial = []) {
     if (url.endsWith('/lifecycle')) return lifecycle(url.split('/').at(-2));
     if (url.includes('/delivery')) {
       (api.deliveryReads ||= []).push(url);
+      if(api.deliveryError) throw api.deliveryError;
       const id=url.split('/')[3], result=structuredClone(api.delivery || {task:id,selected:null,versions:[],expectedFingerprint:'f'.repeat(64),blockers:[],warnings:[],reviews:[]});
       if(api.deliveryGate) await api.deliveryGate.promise;
       return result;
@@ -287,4 +289,44 @@ test('pasted receipts use the version endpoint and retain text after a failed sa
   assert.match(b.$('#d-receipt').value,/Draft result/);assert.equal(b.api.patches.length,0);
   b.api.receiptError=null;b.click('[data-act="d-receipt"]');await until(()=>b.$('#toast').textContent.includes('成果版本已保存'));
   assert.equal(b.api.receipts.length,2);assert.equal(b.$('#d-receipt').value,'');
+});
+
+test('a copied URL restores tab, task and historical revision without selecting or approving it', async t => {
+  const id='T-deep', revision=deliveryFixture(id,'v1'); revision.currentId='D-v2';
+  const b=await workbench(t,[task(id,'Deep link fixture')],{url:'http://hub.test/?tab=results&task='+id+'&revision=D-v1',delivery:revision});
+  await until(()=>b.$('#delivery-choice'));
+  assert.equal(b.$('#tab-results').getAttribute('aria-selected'),'true');
+  assert.equal(b.$('#d-title').value,'Deep link fixture');
+  assert.equal(b.$('#delivery-choice').value,'D-v1');
+  assert(b.api.deliveryReads.includes('/api/tasks/'+id+'/delivery/D-v1'));
+  assert.equal(b.docs.get(id).status,'待执行'); assert.equal(b.api.reviews.length,0); assert.equal(b.api.patches.length,0);
+  const count=b.w.history.length; b.notify(); await pause(60); assert.equal(b.w.history.length,count);
+});
+
+test('drawer close, tab change and back/forward preserve working URL destinations',async t=>{
+  const id='T-history',b=await workbench(t,[task(id,'History fixture')]);
+  await b.open(id); assert.equal(new URL(b.w.location.href).searchParams.get('task'),id);
+  b.click('[data-act="close"]'); assert.equal(new URL(b.w.location.href).searchParams.has('task'),false);
+  b.w.history.back(); await until(()=>b.$('#d-title')); assert.equal(b.$('#d-title').value,'History fixture');
+  b.w.history.forward(); await until(()=>!b.$('.drawer')); assert.equal(new URL(b.w.location.href).searchParams.has('task'),false);
+  b.click('#tab-results'); assert.equal(new URL(b.w.location.href).searchParams.get('tab'),'results');
+});
+
+test('missing and deleted deep-linked tasks show a message and remove stale task parameters',async t=>{
+  const missing=await workbench(t,[],{url:'http://hub.test/?tab=invalid&task=T-missing&revision=D-old'});
+  assert.equal(missing.$('#tab-today').getAttribute('aria-selected'),'true');
+  assert.equal(missing.$('.drawer'),null); assert.equal(new URL(missing.w.location.href).searchParams.has('task'),false);
+  assert.match(missing.w.document.body.textContent,/链接中的任务不存在/);
+  const id='T-delete',b=await workbench(t,[task(id,'Deleted fixture')],{url:'http://hub.test/?tab=board&task='+id});
+  await until(()=>b.$('#d-title')); b.docs.delete(id); b.notify(); await until(()=>!b.$('.drawer'));
+  assert.equal(new URL(b.w.location.href).searchParams.has('task'),false);
+});
+
+test('a missing historical revision never shows a cached current result as that revision',async t=>{
+  const id='T-missing-revision',b=await workbench(t,[task(id,'Revision fixture')],{delivery:deliveryFixture(id,'v1')});
+  await b.open(id); await until(()=>b.$('#delivery-choice'));
+  b.api.deliveryError=new Error('找不到成果版本');
+  b.w.history.pushState(null,'','?tab=board&task='+id+'&revision=D-missing'); b.w.dispatchEvent(new b.w.PopStateEvent('popstate'));
+  await until(()=>b.$('.drawer [role="alert"]')?.textContent.includes('找不到成果版本'));
+  assert.equal(b.$('#delivery-choice'),null); assert.equal(b.api.reviews.length,0);
 });
