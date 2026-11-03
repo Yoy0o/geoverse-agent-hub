@@ -14,3 +14,4 @@ migrate/
 .dev.vars.*
 !.dev.vars.example
 dist/
+.local-verification/

@@ -73,7 +73,7 @@ npm run deploy:cloudflare -- --secrets-file .cloudflare/bootstrap-secrets.json
 
 已有 Worker 的后续发布无需 secrets-file，可直接运行 `npm run deploy:cloudflare` 继承现有密钥和数据库；轮换密钥使用交互式 `npx wrangler secret put HUB_TOKEN`。
 
-现有实例的 P0 更新、备份及回滚步骤见 [发布验收与下一步](P0-RELEASE-AND-NEXT-STEPS.md)。发布后在已有 Hub / Access 凭据环境运行 `npm run verify:release`，核对版本、提交、页面资源、决策卡与 MCP 工具是否一致；脚本只读，不修改业务任务。
+现有实例的 P0 更新、备份及回滚步骤见 [发布验收与下一步](P0-RELEASE-AND-NEXT-STEPS.md)。发布后在已有 Hub / Access 凭据环境运行 `npm run verify:release -- --ref <实际部署提交>`，核对版本、提交、页面资源、注意力、成果与生命周期读取，以及 13 个工作流 MCP 工具；脚本只读，不修改业务任务。具体检查和独立本地全流程验证见 [数据流验证与本地入口](WORKFLOW-VERIFICATION.md)。
 
 `wrangler login` 需要浏览器登录 Cloudflare。可选的非交互部署使用账户的 API Token 环境变量；GitHub origin 或 Hub 访问令牌都不能代替 Cloudflare API Token。
 
