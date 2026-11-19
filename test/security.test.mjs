@@ -51,6 +51,12 @@ test("Access accepts only signed owner identities and approved service tokens", 
   assert.equal((await authorizeAccess(accessRequest(await signed({ common_name: "approved-client" })), accessEnv, publicKey)).service, "approved-client");
   await assert.rejects(authorizeAccess(accessRequest(await signed({ common_name: "other-client" })), accessEnv, publicKey), e => e.status === 403);
 });
+test("Access accepts an approved service token whose JWT has no sub claim", async () => {
+  const noSub = claims => new SignJWT(claims).setProtectedHeader({ alg: "RS256" }).setIssuer("https://example.cloudflareaccess.com").setAudience("hub-test").setIssuedAt().setExpirationTime("5m").sign(privateKey);
+  assert.equal((await authorizeAccess(accessRequest(await noSub({ type: "app", common_name: "approved-client" })), accessEnv, publicKey)).service, "approved-client");
+  await assert.rejects(authorizeAccess(accessRequest(await noSub({ type: "app", common_name: "other-client" })), accessEnv, publicKey), e => e.status === 403);
+  await assert.rejects(authorizeAccess(accessRequest(await noSub({ type: "app" })), accessEnv, publicKey), e => e.status === 403);
+});
 test("Access rejects wrong audience, expired tokens, wrong issuer and wrong signature", async () => {
   await assert.rejects(authorizeAccess(accessRequest(await signed({ email: "hio250@163.com" }, "other-app")), accessEnv, publicKey), e => e.status === 401);
   await assert.rejects(authorizeAccess(accessRequest(await signed({ email: "hio250@163.com" }, "hub-test", "-5m")), accessEnv, publicKey), e => e.status === 401);

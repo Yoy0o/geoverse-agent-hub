@@ -26,9 +26,10 @@ export async function authorizeAccess(request, env, testKeys) {
     }
     keys = keySets.get(team);
   }
+  // Access service-token JWTs carry no "sub" (seen 2026-11-19); identity is the email or common_name allow-list below.
   let payload;
   try {
-    ({ payload } = await jwtVerify(token, keys, { issuer, audience: aud, algorithms: ["RS256"], requiredClaims: ["exp", "iat", "sub"] }));
+    ({ payload } = await jwtVerify(token, keys, { issuer, audience: aud, algorithms: ["RS256"], requiredClaims: ["exp", "iat"] }));
   } catch { throw new AccessError(401, "invalid_access_token"); }
   if (typeof payload.email === "string" && emails.includes(payload.email.toLowerCase())) return { email: payload.email };
   if (typeof payload.common_name === "string" && services.includes(payload.common_name)) return { service: payload.common_name };
